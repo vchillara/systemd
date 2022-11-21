@@ -4,6 +4,7 @@
 # Copyright (c) 2022 Koninklijke Philips N.V.
 # pylint: disable=line-too-long, disable=invalid-name
 # pylint: disable=broad-except, disable=too-many-statements
+# pylint: disable=unsupported-membership-test
 
 '''
     Test mDNS service browse and resolve.
@@ -20,10 +21,11 @@ def run_test():
     Run mDNS browse and resolve tests.
     Returns 0 if passed, 1 if any step fails.
     '''
-    ret = 1
-    logger = logging.getLogger("test-shutdown")
+
+    logger = logging.getLogger("test-resolved-mdns")
     txt_string = ("\"rm=\" \"ve=05\" \"md=Chromecast Ultra\" \"ic=/setup/icon.png\""
             " \"fn=LivingRoom\" \"ca=4101\" \"st=0\" \"bs=FA8FCA7EO948\" \"rs=0\"")
+    ret = 0
 
     logger.info("spawning test")
     console = pexpect.spawn("systemd-nspawn -M testcont -bi ../mkosi.output/image.raw --network-veth", [], env={
@@ -39,8 +41,17 @@ def run_test():
 
         # Setup
         logger.info("configure network")
-        os.system("ip link set ve-testcont up")
+        retval = os.system("systemctl status NetworkManager --no-pager")
+        if retval == 0:
+            os.system("systemctl disable NetworkManager")
+            os.system("systemctl stop NetworkManager")
+        os.system("systemctl enable systemd-networkd")
+        time.sleep(2)
+        os.system("systemctl start systemd-networkd")
         time.sleep(1)
+        console.sendline("systemctl enable systemd-networkd")
+        console.expect("#", 1)
+        console.sendline("systemctl start systemd-networkd")
         console.expect("#", 1)
         console.sendline("systemctl enable --now systemd-resolved")
         console.expect("#", 1)
@@ -50,7 +61,7 @@ def run_test():
         console.expect("#", 1)
         console.sendline("echo $?")
         console.expect('0\r', 2)
-        time.sleep(20)
+        time.sleep(5)
 
         # Test continuous browse and resolve.
         # (1) Publish 10 instances of mDNS service and check if services are listed along with
@@ -77,11 +88,18 @@ def run_test():
                 console.expect("txt = \\[\"id="+s+"\" "+txt_string+"\\]")
             logger.info("Removing services..")
             remove_services(id_list)
-            for s in id_list:
-                console.expect("\\-  host0 AF_INET Chromecast-Ultra-"+s+" _googlecast._tcp     local", 10)
-                console.expect("\\-  host0 AF_INET6 Chromecast-Ultra-"+s+" _googlecast._tcp     local", 10)
+
+        time.sleep(2)
         console.sendcontrol('c')
         console.expect("#", 5)
+
+        for s in id_list:
+            v4teststr="-  host0 AF_INET Chromecast-Ultra-"+s+" _googlecast._tcp     local"
+            if v4teststr not in console.before:
+                raise Exception("Exception in remove services: \nService not removed: " + v4teststr)
+            v6teststr="-  host0 AF_INET6 Chromecast-Ultra-"+s+" _googlecast._tcp     local"
+            if v6teststr not in console.before:
+                raise Exception("Exception in remove services: \nService not removed: " + v6teststr)
         time.sleep(2)
 
         # Test cache maintenance.
@@ -100,8 +118,9 @@ def run_test():
         console.expect("#", 5)
         console.sendline("poweroff")
         console.expect(pexpect.EOF, 3)
-        ret = 0
+
     except Exception as e:
+        ret = 1
         console.sendcontrol('c')
         console.sendline("poweroff")
         time.sleep(1)

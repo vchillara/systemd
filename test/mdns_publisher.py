@@ -4,6 +4,10 @@
 """
     Helper module for mocking mDNS services.
 """
+
+import logging
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+
 import random
 import time
 from scapy.arch import get_if_addr
@@ -12,7 +16,6 @@ from scapy.layers.dns import DNS, DNSRR, DNSRRSRV
 from scapy.layers.inet import IP, UDP, Ether
 from scapy.layers.inet6 import IPv6
 from scapy.sendrecv import sendp
-
 
 MCAST_ADDR_4 = "224.0.0.251"
 MCAST_ADDR_6 = "FF02::FB"
