@@ -3,7 +3,7 @@
 #
 # pylint: disable=line-too-long, disable=invalid-name
 # pylint: disable=broad-except, disable=too-many-statements
-# pylint: disable=unsupported-membership-test
+# pylint: disable=unsupported-membership-test, disable=too-many-branches
 
 '''
     Test mDNS service browse and resolve.
@@ -60,7 +60,17 @@ def run_test():
         console.expect("#", 1)
         console.sendline("echo $?")
         console.expect('0\r', 2)
-        time.sleep(5)
+
+        # Wait for the network interface to be configured. Timeout after 20 seconds
+        retval = -1
+        retry = 0
+        while(retry < 20 and retval != 0):
+            console.sendline('networkctl | grep host0')
+            retval = console.expect(['configured', pexpect.EOF, pexpect.TIMEOUT], 1)
+            retry = retry+1
+
+        if retry >= 20:
+            raise Exception("Failed to configure network.\n")
 
         # Test continuous browse and resolve.
         # (1) Publish 10 instances of mDNS service and check if services are listed along with
@@ -100,6 +110,30 @@ def run_test():
             if v6teststr not in console.before:
                 raise Exception("Exception in remove services: \nService not removed: " + v6teststr)
         time.sleep(2)
+
+        # Test when services are available before the client is started and multiple restarts of the client.
+        id_list = publish_mdns_service(100, 10, 0)
+        id_list.reverse()
+        time.sleep(2)
+        for _ in range(3):
+            console.sendline("mdns-browse-services --domain _googlecast._tcp.local --interface host0"
+                        " --resolve")
+            for s in id_list:
+                console.expect("\\+  host0 AF_INET6 Chromecast-Ultra-"+s+" _googlecast._tcp     local", 10)
+                console.expect("hostname = \\["+s+".local\\]")
+                console.expect("port = \\[8009\\]")
+                console.expect("address = \\["+source_ip6+"\\]")
+                console.expect("txt = \\[\"id="+s+"\" "+txt_string+"\\]")
+            for s in id_list:
+                console.expect("\\+  host0 AF_INET Chromecast-Ultra-"+s+" _googlecast._tcp     local", 10)
+                console.expect("hostname = \\["+s+".local\\]")
+                console.expect("port = \\[8009\\]")
+                console.expect("address = \\["+source_ip4+"\\]")
+                console.expect("txt = \\[\"id="+s+"\" "+txt_string+"\\]")
+
+            console.sendcontrol('c')
+            console.expect("#", 5)
+            time.sleep(2)
 
         # Test cache maintenance.
         # Publish 5 instances of mDNS service with 5 seconds between each.
