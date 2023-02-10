@@ -46,7 +46,6 @@ PACKAGES=(
     libxkbcommon-dev
     libxtables-dev
     libzstd-dev
-    mold
     mount
     net-tools
     perl
