@@ -11,6 +11,9 @@ on:
       - 'meson_options.txt'
       - 'src/**'
       - 'test/fuzz/**'
+  push:
+    branches:
+      - test-workflow
 
 permissions:
   contents: read
