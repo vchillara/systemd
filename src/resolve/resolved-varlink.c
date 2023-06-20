@@ -17,11 +17,11 @@ typedef struct LookupParameters {
 } LookupParameters;
 
 typedef struct LookupParametersMdnsBrowse {
-        char *domain_name;
+        char *domainName;
         char *name;
         char *type;
-        char *ifname;
-        uint64_t token;
+        int ifindex;
+        uint64_t flags;
 } LookupParametersMdnsBrowse;
 
 static void lookup_parameters_destroy(LookupParameters *p) {
@@ -31,10 +31,9 @@ static void lookup_parameters_destroy(LookupParameters *p) {
 
 static void lookup_parameters_mdns_destroy(LookupParametersMdnsBrowse *p) {
         assert(p);
-        free(p->domain_name);
+        free(p->domainName);
         free(p->name);
         free(p->type);
-        free(p->ifname);
 }
 
 static int reply_query_state(DnsQuery *q) {
@@ -120,8 +119,7 @@ static void vl_on_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
         if (!m)
                 return;
 
-        if (m->dns_service_subscriber)
-                m->dns_service_subscriber = mdns_service_subscriber_free(m->dns_service_subscriber);
+        m->dns_service_subscriber = mdns_service_subscriber_free(m->dns_service_subscriber);
 }
 
 static void vl_on_notification_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
@@ -557,11 +555,11 @@ static int vl_method_resolve_address(Varlink *link, JsonVariant *parameters, Var
 
 static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, VarlinkMethodFlags flags, void* userdata) {
         static const JsonDispatch dispatch_table[] = {
-                { "domain_name", JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, domain_name), JSON_MANDATORY },
-                { "name",        JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, name),        JSON_MANDATORY },
-                { "type",        JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, type),        JSON_MANDATORY },
-                { "ifname",      JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, ifname),      JSON_MANDATORY },
-                { "token",       JSON_VARIANT_UNSIGNED, json_dispatch_uint64, offsetof(LookupParametersMdnsBrowse, token),       JSON_MANDATORY },
+                { "domainName", JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, domainName), JSON_MANDATORY },
+                { "name",       JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, name),       JSON_MANDATORY },
+                { "type",       JSON_VARIANT_STRING,   json_dispatch_string, offsetof(LookupParametersMdnsBrowse, type),       JSON_MANDATORY },
+                { "ifindex",    JSON_VARIANT_INTEGER,  json_dispatch_int,    offsetof(LookupParametersMdnsBrowse, ifindex),    JSON_MANDATORY },
+                { "flags",      JSON_VARIANT_UNSIGNED, json_dispatch_uint64, offsetof(LookupParametersMdnsBrowse, flags),      JSON_MANDATORY },
                 {}
         };
 
@@ -571,25 +569,29 @@ static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, Varlin
 
         assert(link);
 
+        /* if the client didn't set the more flag, it is using us incorrectly */
+        if (!FLAGS_SET(flags, VARLINK_METHOD_MORE))
+                return varlink_error_invalid_parameter(link, NULL);
+
         m = varlink_server_get_userdata(varlink_get_server(link));
         assert(m);
 
         r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
-        if (r < 0) {
-                log_error_errno(r, "vl_method_start_browse json_dispatch fail. %m\n");
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "vl_method_start_browse json_dispatch fail: %m");
 
-        r = mdns_subscribe_browse_service(m, link, p.domain_name, p.name, p.type, p.ifname, p.token);
+        if (!validate_and_mangle_flags(NULL, &p.flags, 0))
+                return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("flags"));
+
+        r = mdns_subscribe_browse_service(m, link, p.domainName, p.name, p.type, p.ifindex, p.flags);
         if (r < 0)
                 return varlink_error_errno(link, r);
 
         return 1;
 }
 
-static int vl_method_stop_Browse(Varlink* link, JsonVariant* parameters, VarlinkMethodFlags flags, void* userdata) {
+static int vl_method_stop_browse(Varlink* link, JsonVariant* parameters, VarlinkMethodFlags flags, void* userdata) {
         Manager *m;
-        uint64_t token;
         int r;
 
         assert(link);
@@ -597,9 +599,7 @@ static int vl_method_stop_Browse(Varlink* link, JsonVariant* parameters, Varlink
         m = varlink_server_get_userdata(varlink_get_server(link));
         assert(m);
 
-        token = json_variant_unsigned(json_variant_by_key(parameters, "token"));
-
-        r = mdns_unsubscribe_browse_service(m, link, token);
+        r = mdns_unsubscribe_browse_service(m, link);
         if (r < 0)
                return varlink_error_errno(link, r);
 
@@ -698,7 +698,7 @@ static int varlink_main_server_init(Manager *m) {
                         "io.systemd.Resolve.ResolveHostname",  vl_method_resolve_hostname,
                         "io.systemd.Resolve.ResolveAddress", vl_method_resolve_address,
                         "io.systemd.Resolve.StartBrowse", vl_method_start_browse,
-                        "io.systemd.Resolve.StopBrowse", vl_method_stop_Browse);
+                        "io.systemd.Resolve.StopBrowse", vl_method_stop_browse);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 

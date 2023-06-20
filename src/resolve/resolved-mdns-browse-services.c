@@ -2,22 +2,29 @@
 
 #include "af-list.h"
 #include "event-util.h"
-#include "netlink-util.h"
+#include "random-util.h"
 #include "resolved-dns-cache.h"
 #include "resolved-mdns-browse-services.h"
 #include "resolved-varlink.h"
 
+/* RFC 6762 section 5.2 - A random variation of 2% of the record TTL should
+ * be added to maintenance queries. */
+#define MDNS_MAINTENANCE_JITTER (random_u64_range(100) * 2)
+
 /* RFC 6762 section 5.2 - The querier should plan to issue a query at 80% of
  * the record lifetime, and then if no answer is received, at 85%, 90%, and 95%.
  * Adding 1 to TTL to compensate for clamped TTL. */
-#define MDNS_MAINTENANCE_NEXT(usec,ttl,base_perc) (usec_add(usec, (base_perc) * (1 + ttl) * USEC_PER_SEC))
+static usec_t mdns_maintenance_next(usec_t usec, usec_t ttl, int base_perc) {
+        return usec_add(usec, (base_perc) * (1 + ttl) * USEC_PER_SEC / 100);
+}
 
-/* RFC 6762 section 5.2 - A random variation of 2% of the record TTL should
- * be added to maintenance queries. */
-#define MDNS_MAINTENANCE_JITTER ((double) rand() / RAND_MAX * 0.02)
+static usec_t mdns_maintenance_next_with_jitter(usec_t usec, usec_t ttl, int base_perc) {
+        usec_t jitter = MDNS_MAINTENANCE_JITTER * (1 + ttl) * USEC_PER_SEC / 10000;
+        return usec_add(mdns_maintenance_next(usec, ttl, base_perc), jitter);
+}
 
-#define MDNS_80_PERCENT 0.8
-#define MDNS_5_PERCENT 0.05
+#define MDNS_80_PERCENT 80
+#define MDNS_5_PERCENT 5
 
 typedef struct mDnsGoodbyeParams mDnsGoodbyeParams;
 
@@ -85,29 +92,8 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
 
         service = userdata;
 
-        switch (service->rr_ttl_state) {
-        case MDNS_TTL_80_PERCENT:
-                service->rr_ttl_state = MDNS_TTL_85_PERCENT;
-                break;
-
-        case MDNS_TTL_85_PERCENT:
-                service->rr_ttl_state = MDNS_TTL_90_PERCENT;
-                break;
-
-        case MDNS_TTL_90_PERCENT:
-                service->rr_ttl_state = MDNS_TTL_95_PERCENT;
-                break;
-
-        case MDNS_TTL_95_PERCENT:
-                service->rr_ttl_state = MDNS_TTL_100_PERCENT;
-                break;
-
-        case MDNS_TTL_100_PERCENT:
+        if (service->rr_ttl_state++ == MDNS_TTL_100_PERCENT)
                 return mdns_subscriber_lookup_cache(service->ss, service->family);
-
-        default:
-                assert_not_reached();
-        }
 
         r = dns_query_new(service->ss->m, &q, service->ss->question_utf8, service->ss->question_idna, NULL, service->ss->ifindex, service->ss->flags);
         if (r < 0)
@@ -120,7 +106,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
         if (r < 0)
                 goto finish;
 
-        usec_t next_time = MDNS_MAINTENANCE_NEXT(usec, service->rr->ttl, MDNS_5_PERCENT);
+        usec_t next_time = mdns_maintenance_next(usec, service->rr->ttl, MDNS_5_PERCENT);
 
         r = event_reset_time(
                 service->ss->m->event, &service->schedule_event,
@@ -155,19 +141,20 @@ int mdns_add_new_service(mDnsServiceSubscriber *ss, DnsResourceRecord *rr, int o
                 .ss = mdns_service_subscriber_ref(ss),
                 .rr = dns_resource_record_copy(rr),
                 .family = owner_family,
-                .until = usec_add(usec, rr->ttl * USEC_PER_SEC),
+                .until = usec_add(usec, (rr->ttl + 1) * USEC_PER_SEC),
                 .rr_ttl_state = MDNS_TTL_80_PERCENT,
         };
 
         LIST_PREPEND(mdns_services, ss->mdns_services, s);
 
+        usec_t next_time = mdns_maintenance_next_with_jitter(usec, rr->ttl, MDNS_80_PERCENT);
         /* Schedule the first cache maintenance query at 80% of the record's TTL.
          * RFC 6762 section 5.2. */
         r = sd_event_add_time(
                         ss->m->event,
                         &s->schedule_event,
                         CLOCK_BOOTTIME,
-                        MDNS_MAINTENANCE_NEXT(usec, rr->ttl, (MDNS_80_PERCENT + MDNS_MAINTENANCE_JITTER)),
+                        next_time,
                         0,
                         mdns_maintenance_query,
                         s);
@@ -210,7 +197,7 @@ int mdns_service_update(mDnsServices *service, DnsResourceRecord *rr, usec_t t) 
 
         /* Update the 80% TTL maintenance event based on new record received from the network.
          * RFC 6762 section 5.2  */
-        usec_t next_time = MDNS_MAINTENANCE_NEXT(t, rr->ttl, (MDNS_80_PERCENT + MDNS_MAINTENANCE_JITTER));
+        usec_t next_time = mdns_maintenance_next_with_jitter(t, rr->ttl, MDNS_80_PERCENT);
         if (service->schedule_event)
                 return sd_event_source_set_time(service->schedule_event, next_time);
 
@@ -248,10 +235,10 @@ void mdns_browse_services_purge(Manager *m, int family) {
         if (family == AF_UNSPEC) {
                 r = mdns_subscriber_lookup_cache(ss, AF_INET);
                 if (r < 0)
-                        log_error_errno(r, "Failed to lookup cache: %m");
+                        goto finish;
                 r = mdns_subscriber_lookup_cache(ss, AF_INET6);
                 if (r < 0)
-                        log_error_errno(r, "Failed to lookup cache: %m");
+                        goto finish;
                 return;
         }
 
@@ -354,7 +341,6 @@ int mdns_manage_services_answer(mDnsServiceSubscriber *ss, DnsAnswer *answer, in
 
                 r = json_build(&vm,
                                 JSON_BUILD_OBJECT(
-                                                JSON_BUILD_PAIR("token", JSON_BUILD_UNSIGNED(ss->token)),
                                                 JSON_BUILD_PAIR("browser_service_data", JSON_BUILD_VARIANT(array))));
                 if (r < 0)
                         goto finish;
@@ -582,20 +568,18 @@ int mdns_subscribe_browse_service(
                 const char *domain,
                 const char *name,
                 const char *type,
-                const char *ifname,
-                const uint64_t token) {
+                int ifindex,
+                uint64_t flags) {
 
         _cleanup_(mdns_service_subscriber_unrefp) mDnsServiceSubscriber *ss = NULL;
         _cleanup_(dns_question_unrefp) DnsQuestion *question_idna = NULL, *question_utf8 = NULL;
-        int ifindex;
         int r;
 
         assert(m);
         assert(link);
 
-        ifindex = rtnl_resolve_ifname(NULL, ifname);
         if (ifindex <= 0)
-                return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("ifname"));
+                return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("ifindex"));
 
         if (m->dns_service_subscriber)
                 return -EBUSY;
@@ -636,19 +620,24 @@ int mdns_subscribe_browse_service(
                 .question_idna = dns_question_ref(question_idna),
                 .key = dns_question_first_key(question_utf8),
                 .ifindex = ifindex,
-                .token = token,
-                .flags = SD_RESOLVED_MDNS,
+                .flags = flags,
         };
 
-        r = sd_event_add_time(m->event,
-                        &ss->schedule_event,
-                        CLOCK_BOOTTIME,
-                        usec_add(now(CLOCK_BOOTTIME), (ss->delay * USEC_PER_SEC)),
-                        0,
-                        mdns_next_query_schedule,
-                        ss);
-        if (r < 0)
-                return r;
+        switch (flags) {
+        case SD_RESOLVED_MDNS:
+                r = sd_event_add_time(m->event,
+                                &ss->schedule_event,
+                                CLOCK_BOOTTIME,
+                                usec_add(now(CLOCK_BOOTTIME), (ss->delay * USEC_PER_SEC)),
+                                0,
+                                mdns_next_query_schedule,
+                                ss);
+                if (r < 0)
+                        return r;
+                break;
+        default:
+                return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("flags"));
+        }
 
         m->dns_service_subscriber = TAKE_PTR(ss);
 
@@ -660,6 +649,9 @@ mDnsServiceSubscriber *mdns_service_subscriber_free(mDnsServiceSubscriber *ss) {
 
         if (!ss)
                 return NULL;
+
+        LIST_FOREACH(mdns_services, service, ss->mdns_services)
+                mdns_remove_service(ss, service);
 
         sd_event_source_disable_unref(ss->schedule_event);
 
@@ -685,7 +677,7 @@ mDnsGoodbyeParams* mdns_goodbye_params_free(mDnsGoodbyeParams *p) {
         return mfree(p);
 }
 
-int mdns_unsubscribe_browse_service(Manager *m, Varlink *link, uint64_t token){
+int mdns_unsubscribe_browse_service(Manager *m, Varlink *link){
         assert(m);
 
         LIST_FOREACH(mdns_services, service, m->dns_service_subscriber->mdns_services)

@@ -72,7 +72,7 @@ int mdns_subscribe_browse_service(Manager *m,
                 const char *domain,
                 const char * name,
                 const char * type,
-                const char * ifname,
-                const uint64_t token);
-int mdns_unsubscribe_browse_service(Manager *m, Varlink *link, uint64_t token);
+                int ifindex,
+                uint64_t flags);
+int mdns_unsubscribe_browse_service(Manager *m, Varlink *link);
 int mdns_notify_subscribers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family, bool has_goodbye);

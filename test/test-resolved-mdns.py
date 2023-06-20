@@ -27,14 +27,18 @@ def run_test():
     ret = 0
 
     logger.info("spawning test")
-    console = pexpect.spawn("systemd-nspawn -M testcont -bi ../mkosi.output/image.raw --network-veth", [], env={
+    console = pexpect.spawn("systemd-nspawn -M testcont -bi ../mkosi.output/final --network-veth", [], env={
         "TERM": "linux",
-    }, encoding='utf-8', timeout=30)
+    }, encoding='utf-8', timeout=60)
     time.sleep(2)
     console.logfile = sys.stdout
 
     logger.debug("child pid %d", console.pid)
     try:
+        console.expect("Press any key to proceed", 30)
+        console.sendline("")
+        console.expect("Please enter a new root password", 10)
+        console.sendline("")
         console.sendline("uname -n")
         console.expect("testcont")
 

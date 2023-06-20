@@ -327,8 +327,6 @@ static int on_clock_change(sd_event_source *source, int fd, uint32_t revents, vo
 
         log_info("Clock change detected. Flushing caches.");
         manager_flush_caches(m, LOG_DEBUG /* downgrade the functions own log message, since we already logged here at LOG_INFO level */);
-        mdns_browse_services_purge(m, AF_UNSPEC); /* Clear records of mDNS service browse subscriber, since caches are flushed */
-        mdns_ss_reset(m);
 
         /* The clock change timerfd is unusable after it triggered once, create a new one. */
         return manager_clock_change_listen(m);
@@ -1622,6 +1620,9 @@ void manager_flush_caches(Manager *m, int log_level) {
 
         LIST_FOREACH(scopes, scope, m->dns_scopes)
                 dns_cache_flush(&scope->cache);
+
+        mdns_browse_services_purge(m, AF_UNSPEC); /* Clear records of DNS service browse subscriber, since caches are flushed */
+        mdns_ss_reset(m);
 
         log_full(log_level, "Flushed all caches.");
 }

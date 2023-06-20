@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <net/if.h>
+#include "netlink-util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -24,7 +25,6 @@
 
 #define VL_SERVICE_RESOLVE_RETRY 2
 
-static uint64_t m_token;
 static bool resolve_flag = false;
 static int n_columns = 80;
 
@@ -249,9 +249,6 @@ static int service_query_reply(
         if (!json_variant_is_array(recv_data))
                 return 0;
 
-        if (m_token != json_variant_unsigned(json_variant_by_key(parameters, "token")))
-                return 0;
-
         _cleanup_(varlink_unrefp) Varlink *resolve_link = NULL;
 
         r = varlink_connect_address(&resolve_link, "/run/systemd/resolve/io.systemd.Resolve");
@@ -322,7 +319,6 @@ static int service_query_reply(
 static int stop_signal_handler(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
         Varlink *start_link = NULL;
         _cleanup_(varlink_unrefp) Varlink *stop_link = NULL;
-        _cleanup_(json_variant_unrefp) JsonVariant *call_params = NULL;
         int r;
 
         if (si->ssi_signo != SIGINT)
@@ -333,17 +329,11 @@ static int stop_signal_handler(sd_event_source *s, const struct signalfd_siginfo
 
         start_link = (Varlink*)userdata;
 
-        r = json_build(&call_params,
-                        JSON_BUILD_OBJECT(
-                                        JSON_BUILD_PAIR("token", JSON_BUILD_UNSIGNED(m_token))));
-        if (r < 0)
-                goto finish;
-
         r = varlink_connect_address(&stop_link, "/run/systemd/resolve/io.systemd.Resolve");
         if (r < 0)
                 goto finish;
 
-        r = varlink_call(stop_link, "io.systemd.Resolve.StopBrowse", call_params, NULL, NULL, NULL);
+        r = varlink_call(stop_link, "io.systemd.Resolve.StopBrowse", NULL, NULL, NULL, NULL);
         if (r < 0)
                 goto finish;
 
@@ -435,6 +425,7 @@ static int run(int argc, char **argv) {
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         sigset_t ss;
         char *ec;
+        int ifindex;
         int r;
 
         if ((ec = getenv("COLUMNS")))
@@ -443,6 +434,10 @@ static int run(int argc, char **argv) {
         r = native_parse_argv(argc, argv);
         if (r <= 0)
                 return r;
+
+        ifindex = rtnl_resolve_ifname(NULL, in_ifname);
+        if (ifindex < 0)
+                goto finish;
 
         r = varlink_connect_address(&start_link, "/run/systemd/resolve/io.systemd.Resolve");
         if (r < 0)
@@ -486,15 +481,13 @@ static int run(int argc, char **argv) {
         if (r < 0)
                 goto finish;
 
-        random_bytes(&m_token, sizeof(uint64_t));
-
         r = json_build(&in_params,
                         JSON_BUILD_OBJECT(
-                                        JSON_BUILD_PAIR("domain_name", JSON_BUILD_STRING(in_domain? : "")),
+                                        JSON_BUILD_PAIR("domainName", JSON_BUILD_STRING(in_domain? : "")),
                                         JSON_BUILD_PAIR("name", JSON_BUILD_STRING(in_name? : "")),
                                         JSON_BUILD_PAIR("type", JSON_BUILD_STRING(in_type? : "")),
-                                        JSON_BUILD_PAIR("ifname", JSON_BUILD_STRING(in_ifname? : "")),
-                                        JSON_BUILD_PAIR("token", JSON_BUILD_UNSIGNED(m_token))));
+                                        JSON_BUILD_PAIR("ifindex", JSON_BUILD_INTEGER(ifindex)),
+                                        JSON_BUILD_PAIR("flags", JSON_BUILD_INTEGER(SD_RESOLVED_MDNS))));
         if (r < 0)
                 goto finish;
 

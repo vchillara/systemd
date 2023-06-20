@@ -353,8 +353,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
         Manager *m = userdata;
         DnsScope *scope;
         int r;
-        bool unsolicited_packet = true;
-        bool has_goodbye = false;
+        bool unsolicited_packet = true, has_goodbye = false;
 
         r = manager_recv(m, fd, DNS_PROTOCOL_MDNS, &p);
         if (r <= 0)
