@@ -119,7 +119,7 @@ static void vl_on_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
         if (!m)
                 return;
 
-        m->dns_service_subscriber = mdns_service_subscriber_free(m->dns_service_subscriber);
+        m->dns_service_browser = dns_service_browser_free(m->dns_service_browser);
 }
 
 static void vl_on_notification_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
@@ -583,7 +583,7 @@ static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, Varlin
         if (!validate_and_mangle_flags(NULL, &p.flags, 0))
                 return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("flags"));
 
-        r = mdns_subscribe_browse_service(m, link, p.domainName, p.name, p.type, p.ifindex, p.flags);
+        r = dns_subscribe_browse_service(m, link, p.domainName, p.name, p.type, p.ifindex, p.flags);
         if (r < 0)
                 return varlink_error_errno(link, r);
 
@@ -599,7 +599,7 @@ static int vl_method_stop_browse(Varlink* link, JsonVariant* parameters, Varlink
         m = varlink_server_get_userdata(varlink_get_server(link));
         assert(m);
 
-        r = mdns_unsubscribe_browse_service(m, link);
+        r = dns_unsubscribe_browse_service(m, link);
         if (r < 0)
                return varlink_error_errno(link, r);
 

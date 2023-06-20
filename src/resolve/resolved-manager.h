@@ -160,7 +160,7 @@ struct Manager {
         size_t n_socket_graveyard;
 
         struct sigrtmin18_info sigrtmin18_info;
-        mDnsServiceSubscriber *dns_service_subscriber;
+        DnsServiceBrowser *dns_service_browser;
 };
 
 /* Manager */

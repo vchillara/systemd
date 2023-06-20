@@ -120,7 +120,7 @@ DnsScope* dns_scope_free(DnsScope *s) {
         dns_zone_flush(&s->zone);
 
         /* Clear records of mDNS service browse subscriber, since cache bas been flushed */
-        mdns_browse_services_purge(s->manager, s->family);
+        dns_browse_services_purge(s->manager, s->family);
 
         LIST_REMOVE(scopes, s->manager->dns_scopes, s);
         return mfree(s);

@@ -452,7 +452,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
 
                 /* Check incoming packet key matches with active clients if yes update the same */
                 if (unsolicited_packet)
-                        mdns_notify_subscribers_unsolicited_updates(m, p->answer, p->family, has_goodbye);
+                        mdns_notify_browsers_unsolicited_updates(m, p->answer, p->family, has_goodbye);
 
         } else if (dns_packet_validate_query(p) > 0)  {
                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));

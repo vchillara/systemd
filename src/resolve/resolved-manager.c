@@ -763,7 +763,7 @@ Manager *manager_free(Manager *m) {
         dns_trust_anchor_flush(&m->trust_anchor);
         manager_etc_hosts_flush(m);
 
-        m->dns_service_subscriber = mdns_service_subscriber_free(m->dns_service_subscriber);
+        m->dns_service_browser = dns_service_browser_free(m->dns_service_browser);
 
         return mfree(m);
 }
@@ -1621,8 +1621,8 @@ void manager_flush_caches(Manager *m, int log_level) {
         LIST_FOREACH(scopes, scope, m->dns_scopes)
                 dns_cache_flush(&scope->cache);
 
-        mdns_browse_services_purge(m, AF_UNSPEC); /* Clear records of DNS service browse subscriber, since caches are flushed */
-        mdns_ss_reset(m);
+        dns_browse_services_purge(m, AF_UNSPEC); /* Clear records of DNS service browse subscriber, since caches are flushed */
+        dns_service_browser_reset(m);
 
         log_full(log_level, "Flushed all caches.");
 }
