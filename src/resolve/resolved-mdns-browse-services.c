@@ -600,11 +600,11 @@ int dns_subscribe_browse_service(
         if (r == 0)
                 return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("domain"));
 
-        r = dns_question_new_service(&question_utf8, name, type, domain, false, false, DNS_TYPE_PTR);
+        r = dns_question_new_service_type(&question_utf8, name, type, domain, false, DNS_TYPE_PTR);
         if (r < 0)
                 return r;
 
-        r = dns_question_new_service(&question_idna, name, type, domain, false, true, DNS_TYPE_PTR);
+        r = dns_question_new_service_type(&question_idna, name, type, domain, true, DNS_TYPE_PTR);
         if (r < 0)
                 return r;
 

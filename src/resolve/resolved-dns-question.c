@@ -412,14 +412,73 @@ int dns_question_new_reverse(DnsQuestion **ret, int family, const union in_addr_
         return 0;
 }
 
+int dns_question_new_service_type(
+                DnsQuestion **ret,
+                const char *service,
+                const char *type,
+                const char *domain,
+                bool convert_idna,
+                uint16_t record_type) {
+
+        _cleanup_(dns_resource_key_unrefp) DnsResourceKey *key = NULL;
+        _cleanup_(dns_question_unrefp) DnsQuestion *q = NULL;
+        _cleanup_free_ char *buf = NULL, *joined = NULL;
+        const char *name;
+        int r;
+
+        assert(ret);
+
+        if (record_type == DNS_TYPE_SRV)
+                return -EINVAL;
+
+        if (!domain)
+                return -EINVAL;
+
+        if (type) {
+                if (convert_idna) {
+                        r = dns_name_apply_idna(domain, &buf);
+                        if (r < 0)
+                                return r;
+                        if (r > 0)
+                                domain = buf;
+                }
+
+                r = dns_service_join(service, type, domain, &joined);
+                if (r < 0)
+                        return r;
+
+                name = joined;
+        } else {
+                if (service)
+                        return -EINVAL;
+
+                name = domain;
+        }
+
+        q = dns_question_new(1);
+        if (!q)
+                return -ENOMEM;
+
+        key = dns_resource_key_new(DNS_CLASS_IN, record_type, name);
+        if (!key)
+                return -ENOMEM;
+
+        r = dns_question_add(q, key, 0);
+        if (r < 0)
+                return r;
+
+        *ret = TAKE_PTR(q);
+
+        return 0;
+}
+
 int dns_question_new_service(
                 DnsQuestion **ret,
                 const char *service,
                 const char *type,
                 const char *domain,
                 bool with_txt,
-                bool convert_idna,
-                uint16_t record_type) {
+                bool convert_idna) {
 
         _cleanup_(dns_resource_key_unrefp) DnsResourceKey *key = NULL;
         _cleanup_(dns_question_unrefp) DnsQuestion *q = NULL;
@@ -443,9 +502,6 @@ int dns_question_new_service(
          *
          * It's not supported to specify a service name without a type, or no domain name.
          */
-
-        if (record_type != DNS_TYPE_SRV && with_txt)
-                return -EINVAL;
 
         if (!domain)
                 return -EINVAL;
@@ -475,7 +531,7 @@ int dns_question_new_service(
         if (!q)
                 return -ENOMEM;
 
-        key = dns_resource_key_new(DNS_CLASS_IN, record_type, name);
+        key = dns_resource_key_new(DNS_CLASS_IN, DNS_TYPE_SRV, name);
         if (!key)
                 return -ENOMEM;
 
