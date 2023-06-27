@@ -105,6 +105,13 @@ static void vl_on_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
         assert(s);
         assert(link);
 
+        m = varlink_server_get_userdata(s);
+        if (!m)
+                return;
+
+        DnsServiceBrowser *ss = hashmap_remove(m->dns_service_browsers, link);
+        dns_service_browser_free(ss);
+
         q = varlink_get_userdata(link);
         if (!q)
                 return;
@@ -114,12 +121,6 @@ static void vl_on_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
 
         log_debug("Client of active query vanished, aborting query.");
         dns_query_complete(q, DNS_TRANSACTION_ABORTED);
-
-        m = varlink_server_get_userdata(varlink_get_server(link));
-        if (!m)
-                return;
-
-        m->dns_service_browser = dns_service_browser_free(m->dns_service_browser);
 }
 
 static void vl_on_notification_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
@@ -576,6 +577,9 @@ static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, Varlin
         m = varlink_server_get_userdata(varlink_get_server(link));
         assert(m);
 
+        if (!hashmap_isempty(m->dns_service_browsers))
+                return varlink_error_errno(link, EBUSY);
+
         r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
         if (r < 0)
                 return log_error_errno(r, "vl_method_start_browse json_dispatch fail: %m");
@@ -587,23 +591,6 @@ static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, Varlin
         if (r < 0)
                 return varlink_error_errno(link, r);
 
-        return 1;
-}
-
-static int vl_method_stop_browse(Varlink* link, JsonVariant* parameters, VarlinkMethodFlags flags, void* userdata) {
-        Manager *m;
-        int r;
-
-        assert(link);
-
-        m = varlink_server_get_userdata(varlink_get_server(link));
-        assert(m);
-
-        r = dns_unsubscribe_browse_service(m, link);
-        if (r < 0)
-               return varlink_error_errno(link, r);
-
-        varlink_reply(link, NULL);
         return 1;
 }
 
@@ -697,8 +684,7 @@ static int varlink_main_server_init(Manager *m) {
                         s,
                         "io.systemd.Resolve.ResolveHostname",  vl_method_resolve_hostname,
                         "io.systemd.Resolve.ResolveAddress", vl_method_resolve_address,
-                        "io.systemd.Resolve.StartBrowse", vl_method_start_browse,
-                        "io.systemd.Resolve.StopBrowse", vl_method_stop_browse);
+                        "io.systemd.Resolve.StartBrowse", vl_method_start_browse);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 

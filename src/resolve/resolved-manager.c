@@ -688,6 +688,7 @@ int manager_start(Manager *m) {
 Manager *manager_free(Manager *m) {
         Link *l;
         DnssdService *s;
+        DnsServiceBrowser *sb;
 
         if (!m)
                 return NULL;
@@ -763,7 +764,9 @@ Manager *manager_free(Manager *m) {
         dns_trust_anchor_flush(&m->trust_anchor);
         manager_etc_hosts_flush(m);
 
-        m->dns_service_browser = dns_service_browser_free(m->dns_service_browser);
+        while ((sb = hashmap_first(m->dns_service_browsers)))
+                dns_service_browser_free(sb);
+        hashmap_free(m->dns_service_browsers);
 
         return mfree(m);
 }

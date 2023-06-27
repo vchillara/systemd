@@ -251,15 +251,17 @@ static int service_query_reply(
 
         _cleanup_(varlink_unrefp) Varlink *resolve_link = NULL;
 
-        r = varlink_connect_address(&resolve_link, "/run/systemd/resolve/io.systemd.Resolve");
-        if (r < 0)
-                return 0;
+        if (resolve_flag) {
+                r = varlink_connect_address(&resolve_link, "/run/systemd/resolve/io.systemd.Resolve");
+                if (r < 0)
+                        return 0;
 
-        r = varlink_set_description(resolve_link, "Resolve client");
-        if (r < 0)
-                return 0;
+                r = varlink_set_description(resolve_link, "Resolve client");
+                if (r < 0)
+                        return 0;
 
-        varlink_set_relative_timeout(resolve_link, 120 * USEC_PER_SEC);
+                varlink_set_relative_timeout(resolve_link, 120 * USEC_PER_SEC);
+        }
 
         JsonVariant *in;
         JSON_VARIANT_ARRAY_FOREACH(in, recv_data) {
@@ -314,33 +316,6 @@ static int service_query_reply(
                 }
         }
 
-        return 0;
-}
-static int stop_signal_handler(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
-        Varlink *start_link = NULL;
-        _cleanup_(varlink_unrefp) Varlink *stop_link = NULL;
-        int r;
-
-        if (si->ssi_signo != SIGINT)
-                return 0;
-
-        if (userdata == NULL)
-                return 0;
-
-        start_link = (Varlink*)userdata;
-
-        r = varlink_connect_address(&stop_link, "/run/systemd/resolve/io.systemd.Resolve");
-        if (r < 0)
-                goto finish;
-
-        r = varlink_call(stop_link, "io.systemd.Resolve.StopBrowse", NULL, NULL, NULL, NULL);
-        if (r < 0)
-                goto finish;
-
-        r = sd_event_exit(varlink_get_event(start_link), 0);
-finish:
-        if (r < 0)
-                printf("Stop The Browse failed %d \n",r);
         return 0;
 }
 
@@ -423,10 +398,9 @@ static int run(int argc, char **argv) {
         _cleanup_(varlink_unrefp) Varlink *start_link = NULL;
         _cleanup_(json_variant_unrefp)JsonVariant *in_params = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        sigset_t ss;
         char *ec;
         int ifindex;
-        int r;
+        int r, c;
 
         if ((ec = getenv("COLUMNS")))
                 n_columns = atoi(ec);
@@ -457,23 +431,11 @@ static int run(int argc, char **argv) {
         if (r < 0)
                 goto finish;
 
-        r = sigemptyset(&ss);
-        if (r < 0)
-                goto finish;
-
-        r = sigaddset(&ss, SIGINT);
-        if (r < 0)
-                goto finish;
-
-        r = sigprocmask(SIG_BLOCK, &ss, NULL);
+        r = sd_event_set_signal_exit(event, true);
         if (r < 0)
                 goto finish;
 
         r = varlink_attach_event(start_link, event, 0);
-        if (r < 0)
-                goto finish;
-
-        r = sd_event_add_signal(event, NULL, SIGINT, stop_signal_handler, start_link);
         if (r < 0)
                 goto finish;
 
@@ -496,12 +458,19 @@ static int run(int argc, char **argv) {
                 goto finish;
 
         r = sd_event_loop(varlink_get_event(start_link));
+        if (r < 0)
+                goto finish;
 
+        r = sd_event_get_exit_code(event, &c);
+        if (r < 0)
+                goto finish;
+
+        return c;
 finish:
         if (r < 0)
                 log_error_errno(r, "Init failed. %m");
 
-        return 0;
+        return r;
 }
 
 DEFINE_MAIN_FUNCTION(run);

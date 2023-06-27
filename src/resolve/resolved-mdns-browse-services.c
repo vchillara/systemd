@@ -59,7 +59,7 @@ static void mdns_maintenance_query_complete(DnsQuery *q) {
         assert(query);
         assert(query->manager);
 
-        ss = dns_service_browser_ref(query->manager->dns_service_browser);
+        ss = dns_service_browser_ref(hashmap_get(query->manager->dns_service_browsers, query->varlink_request));
         if (!ss)
                 return;
 
@@ -100,7 +100,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
                 goto finish;
 
         q->complete = mdns_maintenance_query_complete;
-        q->varlink_request = NULL;
+        q->varlink_request = varlink_ref(service->ss->link);
 
         r = dns_query_go(q);
         if (r < 0)
@@ -219,30 +219,33 @@ bool dns_service_contains(DnsService *services, DnsResourceRecord *rr, int owner
 }
 
 void dns_browse_services_purge(Manager *m, int family) {
-        int r;
+        int r = 0;
 
         /* Called after caches are flused.
          * Clear local service records and notify varlink client. */
-        if (!(m && m->dns_service_browser))
+        if (!(m && m->dns_service_browsers))
                 return;
 
-        DnsServiceBrowser *ss = m->dns_service_browser;
-
-        r = sd_event_source_set_enabled(ss->schedule_event, SD_EVENT_OFF);
-        if (r < 0)
-                goto finish;
-
-        if (family == AF_UNSPEC) {
-                r = mdns_browser_lookup_cache(ss, AF_INET);
+        DnsServiceBrowser *ss;
+        HASHMAP_FOREACH(ss, m->dns_service_browsers) {
+                r = sd_event_source_set_enabled(ss->schedule_event, SD_EVENT_OFF);
                 if (r < 0)
                         goto finish;
-                r = mdns_browser_lookup_cache(ss, AF_INET6);
+
+                if (family == AF_UNSPEC) {
+                        r = mdns_browser_lookup_cache(ss, AF_INET);
+                        if (r < 0)
+                                goto finish;
+                        r = mdns_browser_lookup_cache(ss, AF_INET6);
+                        if (r < 0)
+                                goto finish;
+                        return;
+                }
+
+                r = mdns_browser_lookup_cache(ss, family);
                 if (r < 0)
                         goto finish;
-                return;
         }
-
-        r = mdns_browser_lookup_cache(ss, family);
 
 finish:
         if (r < 0)
@@ -390,6 +393,9 @@ static int goodbye_callback(sd_event_source *s, uint64_t usec, void *userdata) {
         _cleanup_(mdns_goodbye_params_freep) mDnsGoodbyeParams *cb_params = userdata;
         int r;
 
+        if (!cb_params->ss)
+                return 0;
+
         r = mdns_browser_lookup_cache(cb_params->ss, cb_params->owner_family);
         if (r < 0)
                 return log_error_errno(r, "Failed to lookup cache: %m");
@@ -404,47 +410,48 @@ int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int 
         assert(answer);
         assert(m);
 
-        ss = dns_service_browser_ref(m->dns_service_browser);
-        if (!ss)
+        if (!m->dns_service_browsers)
                 return 0;
 
-        r = dns_answer_match_key(answer, ss->key, NULL);
-        if (r < 0)
-                goto finish;
-        else if (r == 0)
-                return 0;
-
-        if (has_goodbye) {
-                _cleanup_(mdns_goodbye_params_freep) mDnsGoodbyeParams *cb_params = NULL;
-
-                cb_params = new(mDnsGoodbyeParams, 1);
-                if (!cb_params)
-                        return log_oom();
-
-                *cb_params = (mDnsGoodbyeParams) {
-                        .ss = dns_service_browser_ref(ss),
-                        .owner_family = owner_family,
-                };
-
-                r = sd_event_add_time_relative(
-                        m->event,
-                        NULL,
-                        CLOCK_BOOTTIME,
-                        USEC_PER_SEC,
-                        0,
-                        goodbye_callback,
-                        cb_params
-                );
+        HASHMAP_FOREACH(ss, m->dns_service_browsers) {
+                r = dns_answer_match_key(answer, ss->key, NULL);
                 if (r < 0)
                         goto finish;
+                else if (r == 0)
+                        continue;
 
-                TAKE_PTR(cb_params);
-                return 0;
+                if (has_goodbye) {
+                        _cleanup_(mdns_goodbye_params_freep) mDnsGoodbyeParams *cb_params = NULL;
+
+                        cb_params = new(mDnsGoodbyeParams, 1);
+                        if (!cb_params)
+                                return log_oom();
+
+                        *cb_params = (mDnsGoodbyeParams) {
+                                .ss = dns_service_browser_ref(ss),
+                                .owner_family = owner_family,
+                        };
+
+                        r = sd_event_add_time_relative(
+                                m->event,
+                                NULL,
+                                CLOCK_BOOTTIME,
+                                USEC_PER_SEC,
+                                0,
+                                goodbye_callback,
+                                cb_params
+                        );
+                        if (r < 0)
+                                goto finish;
+
+                        TAKE_PTR(cb_params);
+                        continue;
+                }
+
+                r = mdns_browser_lookup_cache(ss, owner_family);
+                if (r < 0)
+                        goto finish;
         }
-
-        r = mdns_browser_lookup_cache(ss, owner_family);
-        if (r < 0)
-                goto finish;
 
         return 0;
 
@@ -463,7 +470,7 @@ static void mdns_browse_service_query_complete(DnsQuery *q) {
         if (query->state != DNS_TRANSACTION_SUCCESS)
                 return;
 
-        ss = dns_service_browser_ref(query->manager->dns_service_browser);
+        ss = dns_service_browser_ref(hashmap_get(query->manager->dns_service_browsers, query->varlink_request));
         if (!ss)
                 return;
 
@@ -544,20 +551,22 @@ finish:
 void dns_service_browser_reset(Manager *m) {
         int r;
 
-        if (!(m && m->dns_service_browser))
+        if (!(m && m->dns_service_browsers))
                 return;
 
-        DnsServiceBrowser *ss = m->dns_service_browser;
+        DnsServiceBrowser *ss;
 
-        ss->delay = 0;
+        HASHMAP_FOREACH(ss, m->dns_service_browsers) {
+                ss->delay = 0;
 
-        r = event_reset_time_relative(
-                ss->m->event, &ss->schedule_event,
-                CLOCK_BOOTTIME, (ss->delay * USEC_PER_SEC),
-                0, mdns_next_query_schedule,
-                ss, 0, "mdns-next-query-schedule", true);
-        if (r < 0)
-                log_error_errno(r, "Failed to reset mdns service subscriber, %m");
+                r = event_reset_time_relative(
+                        ss->m->event, &ss->schedule_event,
+                        CLOCK_BOOTTIME, (ss->delay * USEC_PER_SEC),
+                        0, mdns_next_query_schedule,
+                        ss, 0, "mdns-next-query-schedule", true);
+                if (r < 0)
+                        log_error_errno(r, "Failed to reset mdns service subscriber, %m");
+        }
 
         return;
 }
@@ -580,9 +589,6 @@ int dns_subscribe_browse_service(
 
         if (ifindex <= 0)
                 return varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("ifindex"));
-
-        if (m->dns_service_browser)
-                return -EBUSY;
 
         if (isempty(name))
                 name = NULL;
@@ -636,12 +642,12 @@ int dns_subscribe_browse_service(
                         return r;
                 break;
         default:
-                return -1;
+                return -EINVAL;
         }
 
-        m->dns_service_browser = TAKE_PTR(ss);
+        r = hashmap_ensure_put(&m->dns_service_browsers, NULL, link, TAKE_PTR(ss));
 
-        return 0;
+        return r;
 }
 
 DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *ss) {
@@ -675,15 +681,4 @@ mDnsGoodbyeParams* mdns_goodbye_params_free(mDnsGoodbyeParams *p) {
 
         dns_service_browser_unref(p->ss);
         return mfree(p);
-}
-
-int dns_unsubscribe_browse_service(Manager *m, Varlink *link){
-        assert(m);
-
-        LIST_FOREACH(dns_services, service, m->dns_service_browser->dns_services)
-                dns_remove_service( m->dns_service_browser, service);
-
-        m->dns_service_browser = dns_service_browser_unref(m->dns_service_browser);
-
-        return 0;
 }
