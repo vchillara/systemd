@@ -629,7 +629,7 @@ int dns_subscribe_browse_service(
                 .flags = flags,
         };
 
-        switch (flags) {
+        switch (flags & SD_RESOLVED_PROTOCOLS_ALL) {
         case SD_RESOLVED_MDNS:
                 r = sd_event_add_time(m->event,
                                 &ss->schedule_event,
@@ -645,9 +645,13 @@ int dns_subscribe_browse_service(
                 return -EINVAL;
         }
 
-        r = hashmap_ensure_put(&m->dns_service_browsers, NULL, link, TAKE_PTR(ss));
+        r = hashmap_ensure_put(&m->dns_service_browsers, NULL, link, ss);
+        if (r < 0)
+                return r;
 
-        return r;
+        TAKE_PTR(ss);
+
+        return 0;
 }
 
 DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *ss) {

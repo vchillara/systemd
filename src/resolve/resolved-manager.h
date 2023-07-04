@@ -160,6 +160,8 @@ struct Manager {
         size_t n_socket_graveyard;
 
         struct sigrtmin18_info sigrtmin18_info;
+
+        /* Map varlink links to DnsServiceBrowser instances. */
         Hashmap *dns_service_browsers;
 };
 
