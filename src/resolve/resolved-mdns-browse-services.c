@@ -629,6 +629,7 @@ int dns_subscribe_browse_service(
                 .flags = flags,
         };
 
+        /* Only mDNS continuous querying is currently supported. See RFC 6762 */
         switch (flags & SD_RESOLVED_PROTOCOLS_ALL) {
         case SD_RESOLVED_MDNS:
                 r = sd_event_add_time(m->event,
