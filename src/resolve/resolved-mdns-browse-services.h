@@ -21,7 +21,7 @@ enum DnsRecordTTLState {
 
 struct DnsService {
         unsigned n_ref;
-        DnsServiceBrowser *ss;
+        DnsServiceBrowser *sb;
         sd_event_source *schedule_event;
         DnsResourceRecord *rr;
         int family;
@@ -46,12 +46,12 @@ struct DnsServiceBrowser {
         LIST_HEAD(DnsService, dns_services);
 };
 
-DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *ss);
-void dns_remove_service(DnsServiceBrowser *ss, DnsService *service);
+DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *sb);
+void dns_remove_service(DnsServiceBrowser *sb, DnsService *service);
 DnsService *dns_service_free(DnsService *service);
 
-DnsServiceBrowser* dns_service_browser_ref(DnsServiceBrowser *ss);
-DnsServiceBrowser* dns_service_browser_unref(DnsServiceBrowser *ss);
+DnsServiceBrowser* dns_service_browser_ref(DnsServiceBrowser *sb);
+DnsServiceBrowser* dns_service_browser_unref(DnsServiceBrowser *sb);
 
 DnsService* dns_service_ref(DnsService *service);
 DnsService* dns_service_unref(DnsService *service);
@@ -63,10 +63,10 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServiceBrowser*, dns_service_browser_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsService*, dns_service_unref);
 
 bool dns_service_contains(DnsService *services, DnsResourceRecord *rr, int owner_family);
-int mdns_manage_services_answer(DnsServiceBrowser *ss, DnsAnswer *answer, int owner_family);
-int dns_add_new_service(DnsServiceBrowser *ss, DnsResourceRecord *rr, int owner_family);
+int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int owner_family);
+int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_family);
 int mdns_service_update(DnsService *service, DnsResourceRecord *rr, usec_t t);
-int mdns_browser_lookup_cache(DnsServiceBrowser *ss, int owner_family);
+int mdns_browser_lookup_cache(DnsServiceBrowser *sb, int owner_family);
 int dns_subscribe_browse_service(Manager *m,
                 Varlink *link,
                 const char *domain,

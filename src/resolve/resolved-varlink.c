@@ -109,8 +109,8 @@ static void vl_on_disconnect(VarlinkServer *s, Varlink *link, void *userdata) {
         if (!m)
                 return;
 
-        DnsServiceBrowser *ss = hashmap_remove(m->dns_service_browsers, link);
-        dns_service_browser_free(ss);
+        DnsServiceBrowser *sb = hashmap_remove(m->dns_service_browsers, link);
+        dns_service_browser_free(sb);
 
         q = varlink_get_userdata(link);
         if (!q)
