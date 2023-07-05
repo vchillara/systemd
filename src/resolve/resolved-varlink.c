@@ -2,10 +2,10 @@
 
 #include "glyph-util.h"
 #include "in-addr-util.h"
+#include "resolved-dns-browse-services.h"
 #include "resolved-dns-synthesize.h"
 #include "resolved-varlink.h"
 #include "socket-netlink.h"
-#include "resolved-mdns-browse-services.h"
 
 typedef struct LookupParameters {
         int ifindex;

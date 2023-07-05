@@ -4,6 +4,7 @@
 
 typedef struct DnsServiceBrowser DnsServiceBrowser;
 
+#include "resolved-dns-query.h"
 #include "resolved-manager.h"
 #include "varlink.h"
 

@@ -3,8 +3,8 @@
 #include "af-list.h"
 #include "event-util.h"
 #include "random-util.h"
+#include "resolved-dns-browse-services.h"
 #include "resolved-dns-cache.h"
-#include "resolved-mdns-browse-services.h"
 #include "resolved-varlink.h"
 
 /* RFC 6762 section 5.2 - A random variation of 2% of the record TTL should

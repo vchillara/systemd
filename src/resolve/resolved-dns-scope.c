@@ -10,12 +10,12 @@
 #include "hostname-util.h"
 #include "missing_network.h"
 #include "random-util.h"
+#include "resolved-dns-browse-services.h"
 #include "resolved-dnssd.h"
 #include "resolved-dns-scope.h"
 #include "resolved-dns-zone.h"
 #include "resolved-llmnr.h"
 #include "resolved-mdns.h"
-#include "resolved-mdns-browse-services.h"
 #include "socket-util.h"
 #include "strv.h"
 

@@ -16,13 +16,13 @@
 
 typedef struct Manager Manager;
 
+#include "resolved-dns-browse-services.h"
 #include "resolved-dns-query.h"
 #include "resolved-dns-search-domain.h"
 #include "resolved-dns-stream.h"
 #include "resolved-dns-stub.h"
 #include "resolved-dns-trust-anchor.h"
 #include "resolved-link.h"
-#include "resolved-mdns-browse-services.h"
 #include "resolved-socket-graveyard.h"
 
 #define MANAGER_SEARCH_DOMAINS_MAX 256
