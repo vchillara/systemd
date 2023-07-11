@@ -29,7 +29,6 @@ static void lookup_parameters_destroy(LookupParameters *p) {
         free(p->name);
 }
 
-
 static int reply_query_state(DnsQuery *q) {
 
         assert(q);
@@ -820,14 +819,6 @@ static void resolve_service_all_complete(DnsQuery *query) {
         if (r < 0)
                 goto finish;
 
-        r = json_build(&ret_canonical,
-                               JSON_BUILD_OBJECT(
-                                               JSON_BUILD_PAIR("name", JSON_BUILD_STRING(name)),
-                                               JSON_BUILD_PAIR("type", JSON_BUILD_STRING(type)),
-                                               JSON_BUILD_PAIR("domain", JSON_BUILD_STRING(domain))));
-        if (r < 0)
-                goto finish;
-
         r = varlink_replyb(query->varlink_request, JSON_BUILD_OBJECT(
                                         JSON_BUILD_PAIR("srv", JSON_BUILD_VARIANT(ret_srv)),
                                         JSON_BUILD_PAIR("addr", JSON_BUILD_VARIANT(ret_addr)),
@@ -840,7 +831,7 @@ static void resolve_service_all_complete(DnsQuery *query) {
 
 finish:
         if (r < 0) {
-                log_error_errno(r, "Failed to send service reply: %m");
+                log_error_errno(r, "Failed to resolve service: %m");
                 r = varlink_error_errno(q->varlink_request, r);
         }
 }
