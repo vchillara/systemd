@@ -1287,7 +1287,7 @@ int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_
         return 1;
 }
 
-int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts, unsigned max_rr) {
+int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts) {
         unsigned ancount = 0;
         DnsCacheItem *i;
         int r;
@@ -1310,10 +1310,7 @@ int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts, 
                                 continue;
 
                         r = dns_packet_append_rr(p, j->rr, 0, NULL, NULL);
-                        if (r == -EMSGSIZE) {
-                                if (max_rr == 0)
-                                        /* If max_rr == 0, do not allocate more packets. */
-                                        goto finalize;
+                        if (r == -EMSGSIZE && p->protocol == DNS_PROTOCOL_MDNS) {
 
                                 /* If we're unable to stuff all known answers into the given packet, allocate
                                  * a new one, push the RR into that one and link it to the current one. */
@@ -1334,21 +1331,8 @@ int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts, 
                                 return r;
 
                         ancount++;
-                        if (max_rr > 0 && ancount >= max_rr) {
-                                DNS_PACKET_HEADER(p)->ancount = htobe16(ancount);
-                                ancount = 0;
-
-                                r = dns_packet_new_query(&p->more, p->protocol, 0, true);
-                                if (r < 0)
-                                        return r;
-
-                                p = p->more;
-
-                                max_rr = UINT_MAX;
-                        }
                 }
 
-finalize:
         DNS_PACKET_HEADER(p)->ancount = htobe16(ancount);
 
         return 0;

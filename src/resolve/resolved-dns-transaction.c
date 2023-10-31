@@ -1789,7 +1789,7 @@ static int dns_packet_append_zone(DnsPacket *p, DnsTransaction *t, DnsResourceKe
 static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
         _cleanup_set_free_ Set *keys = NULL;
-        unsigned qdcount, ancount = 0 /* avoid false maybe-uninitialized warning */, nscount;
+        unsigned qdcount, nscount;
         bool add_known_answers = false;
         usec_t ts;
         int r;
@@ -1898,15 +1898,6 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
                 }
         }
 
-        /* Append known answer section if we're asking for any shared record */
-        if (add_known_answers) {
-                r = dns_cache_export_shared_to_packet(&t->scope->cache, p, ts, 0);
-                if (r < 0)
-                        return r;
-
-                ancount = be16toh(DNS_PACKET_HEADER(p)->ancount);
-        }
-
         /* Then, create actual packet. */
         p = dns_packet_unref(p);
         r = dns_packet_new_query(&p, t->scope->protocol, 0, false);
@@ -1924,7 +1915,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
 
         /* Known answers */
         if (add_known_answers) {
-                r = dns_cache_export_shared_to_packet(&t->scope->cache, p, ts, ancount);
+                r = dns_cache_export_shared_to_packet(&t->scope->cache, p, ts);
                 if (r < 0)
                         return r;
         }

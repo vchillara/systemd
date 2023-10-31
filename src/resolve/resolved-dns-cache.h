@@ -57,4 +57,4 @@ bool dns_cache_is_empty(DnsCache *cache);
 
 unsigned dns_cache_size(DnsCache *cache);
 
-int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts, unsigned max_rr);
+int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p, usec_t ts);
