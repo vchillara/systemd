@@ -15,7 +15,6 @@ set -o pipefail
 . "$(dirname "$0")"/util.sh
 
 RUN_OUT="$(mktemp)"
-VL_RESOLVE_LOGS="/tmp/resolve-vl.txt"
 
 run() {
     "$@" |& tee "$RUN_OUT"
@@ -393,19 +392,13 @@ grep -qF "fd00:dead:beef:cafe::17" "$RUN_OUT"
 grep -qF "authenticated: yes" "$RUN_OUT"
 
 # Test service resolve over Varlink
-(printf '
-{
-  "method": "io.systemd.Resolve.ResolveService",
-  "more": false,
-  "parameters":{"name":"","type":"_mysvc._tcp","domain":"signed.test"}
-}\0')| nc -U /run/systemd/resolve/io.systemd.Resolve > $VL_RESOLVE_LOGS
-
-grep -qF '"srv":{"priority":10,"weight":5,"port":1234,"hostname":"myservice.signed.test"}' "$VL_RESOLVE_LOGS"
-grep -qF '{"ifindex":4,"family":10,"address":[253,0,222,173,190,239,202,254,0,0,0,0,0,0,0,23]}' "$VL_RESOLVE_LOGS"
-grep -qF '{"ifindex":4,"family":2,"address":[10,0,0,20]}' "$VL_RESOLVE_LOGS"
-grep -qF '"normalized":{"normalized":"myservice.signed.test"}' "$VL_RESOLVE_LOGS"
-grep -qF '"canonical":{"name":null,"type":"_mysvc._tcp","domain":"signed.test"}' "$VL_RESOLVE_LOGS"
-TXT_OUT=$(grep -a -o -P '(?<=\"txt\"\:\[\").*(?=\"\])' "$VL_RESOLVE_LOGS" | base64 --decode)
+run varlinkctl call /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.ResolveService '{"name":"","type":"_mysvc._tcp","domain":"signed.test"}'
+grep -qF '"srv":{"priority":10,"weight":5,"port":1234,"hostname":"myservice.signed.test"}' "$RUN_OUT"
+grep -qF '{"ifindex":4,"family":10,"address":[253,0,222,173,190,239,202,254,0,0,0,0,0,0,0,23]}' "$RUN_OUT"
+grep -qF '{"ifindex":4,"family":2,"address":[10,0,0,20]}' "$RUN_OUT"
+grep -qF '"normalized":"myservice.signed.test"' "$RUN_OUT"
+grep -qF '"canonical":{"name":null,"type":"_mysvc._tcp","domain":"signed.test"}' "$RUN_OUT"
+TXT_OUT=$(grep -a -o -P '(?<=\"txt\"\:\[\").*(?=\"\])' "$RUN_OUT" | base64 --decode)
 assert_in "This is TXT for myservice" "$TXT_OUT"
 
 (! run resolvectl service _invalidsvc._udp signed.test)

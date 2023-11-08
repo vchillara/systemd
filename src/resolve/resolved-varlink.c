@@ -553,9 +553,10 @@ static int vl_method_resolve_address(Varlink *link, JsonVariant *parameters, Var
         return 1;
 }
 
-static int append_txt(JsonVariant **ret_txt, DnsResourceRecord *rr) {
+static int append_txt(JsonVariant **txt, DnsResourceRecord *rr) {
         int r;
 
+        assert(txt);
         assert(rr);
         assert(rr->key);
 
@@ -572,7 +573,7 @@ static int append_txt(JsonVariant **ret_txt, DnsResourceRecord *rr) {
                 if (r < 0)
                         return r;
 
-                r = json_variant_append_array(ret_txt, entry);
+                r = json_variant_append_array(txt, entry);
                 if (r < 0)
                         return r;
         }
@@ -583,11 +584,11 @@ static int append_txt(JsonVariant **ret_txt, DnsResourceRecord *rr) {
 static int append_srv(DnsQuery *q,
                       JsonVariant **ret_srv,
                       JsonVariant **ret_addr,
-                      JsonVariant **ret_norm,
+                      char **ret_norm,
                       DnsResourceRecord *rr) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *canonical = NULL;
         _cleanup_free_ char *normalized = NULL;
-        _cleanup_(json_variant_unrefp) JsonVariant *srv = NULL, *addr = NULL, *norm = NULL;
+        _cleanup_(json_variant_unrefp) JsonVariant *srv = NULL, *addr = NULL;
 
         int r;
 
@@ -682,17 +683,9 @@ static int append_srv(DnsQuery *q,
                         return r;
         }
 
-        /* Note that above we appended the hostname as encoded in the
-         * SRV, and here the canonical hostname this maps to. */
-        r = json_build(&norm,
-                        JSON_BUILD_OBJECT(
-                                        JSON_BUILD_PAIR("normalized", JSON_BUILD_STRING(normalized))));
-        if (r < 0)
-                return r;
-
         *ret_srv = TAKE_PTR(srv);
         *ret_addr = TAKE_PTR(addr);
-        *ret_norm = TAKE_PTR(norm);
+        *ret_norm = TAKE_PTR(normalized);
 
         return 1;
 }
@@ -709,8 +702,8 @@ static Varlink *get_vl_link_aux_query(DnsQuery *aux) {
 
 static void resolve_service_all_complete(DnsQuery *query) {
         _cleanup_(dns_query_freep) DnsQuery *q = query;
-        _cleanup_(json_variant_unrefp) JsonVariant *ret_srv = NULL, *ret_addr = NULL, *ret_txt = NULL, *ret_norm = NULL;
-        _cleanup_free_ char *name = NULL, *type = NULL, *domain = NULL;
+        _cleanup_(json_variant_unrefp) JsonVariant *srv = NULL, *addr = NULL, *txt = NULL;
+        _cleanup_free_ char *name = NULL, *type = NULL, *domain = NULL, *norm = NULL;
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *canonical = NULL;
         DnsQuestion *question;
         DnsResourceRecord *rr;
@@ -781,7 +774,7 @@ static void resolve_service_all_complete(DnsQuery *query) {
                 if (r == 0)
                         continue;
 
-                r = append_srv(q, &ret_srv, &ret_addr, &ret_norm, rr);
+                r = append_srv(q, &srv, &addr, &norm, rr);
                 if (r < 0)
                         goto finish;
                 if (r == 0) /* not an SRV record */
@@ -808,7 +801,7 @@ static void resolve_service_all_complete(DnsQuery *query) {
                 if (rr->key->type != DNS_TYPE_TXT)
                         continue;
 
-                r = append_txt(&ret_txt, rr);
+                r = append_txt(&txt, rr);
                 if (r < 0)
                         goto finish;
         }
@@ -819,10 +812,10 @@ static void resolve_service_all_complete(DnsQuery *query) {
                 goto finish;
 
         r = varlink_replyb(query->varlink_request, JSON_BUILD_OBJECT(
-                                        JSON_BUILD_PAIR("srv", JSON_BUILD_VARIANT(ret_srv)),
-                                        JSON_BUILD_PAIR("addr", JSON_BUILD_VARIANT(ret_addr)),
-                                        JSON_BUILD_PAIR("txt", JSON_BUILD_VARIANT(ret_txt)),
-                                        JSON_BUILD_PAIR("normalized", JSON_BUILD_VARIANT(ret_norm)),
+                                        JSON_BUILD_PAIR("srv", JSON_BUILD_VARIANT(srv)),
+                                        JSON_BUILD_PAIR("addr", JSON_BUILD_VARIANT(addr)),
+                                        JSON_BUILD_PAIR("txt", JSON_BUILD_VARIANT(txt)),
+                                        JSON_BUILD_PAIR("normalized", JSON_BUILD_STRING(norm)),
                                         JSON_BUILD_PAIR("canonical", JSON_BUILD_OBJECT(
                                                                         JSON_BUILD_PAIR("name", JSON_BUILD_STRING(name)),
                                                                         JSON_BUILD_PAIR("type", JSON_BUILD_STRING(type)),
@@ -985,9 +978,9 @@ static int vl_method_resolve_service(Varlink* link, JsonVariant* parameters, Var
                 { "name",    JSON_VARIANT_STRING,   json_dispatch_const_string, offsetof(LookupParametersResolveService, name),     JSON_MANDATORY },
                 { "type",    JSON_VARIANT_STRING,   json_dispatch_const_string, offsetof(LookupParametersResolveService, type),     JSON_MANDATORY },
                 { "domain",  JSON_VARIANT_STRING,   json_dispatch_const_string, offsetof(LookupParametersResolveService, domain),   JSON_MANDATORY },
-                { "ifindex", JSON_VARIANT_UNSIGNED, json_dispatch_int,    offsetof(LookupParametersResolveService,       ifindex),  0              },
-                { "family",  JSON_VARIANT_INTEGER,  json_dispatch_int,    offsetof(LookupParametersResolveService,       family),   0              },
-                { "flags",   JSON_VARIANT_UNSIGNED, json_dispatch_uint64, offsetof(LookupParametersResolveService,       in_flags), 0              },
+                { "ifindex", JSON_VARIANT_UNSIGNED, json_dispatch_int,          offsetof(LookupParametersResolveService, ifindex),  0              },
+                { "family",  JSON_VARIANT_INTEGER,  json_dispatch_int,          offsetof(LookupParametersResolveService, family),   0              },
+                { "flags",   JSON_VARIANT_UNSIGNED, json_dispatch_uint64,       offsetof(LookupParametersResolveService, in_flags), 0              },
                 {}
         };
 
@@ -1008,7 +1001,7 @@ static int vl_method_resolve_service(Varlink* link, JsonVariant* parameters, Var
         if (FLAGS_SET(flags, VARLINK_METHOD_ONEWAY))
                 return -EINVAL;
 
-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+        r = varlink_dispatch(link, parameters, dispatch_table, &p);
         if (r < 0)
                 return r;
 
