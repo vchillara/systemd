@@ -115,6 +115,8 @@ DnsScope* dns_scope_free(DnsScope *s) {
 
         sd_event_source_disable_unref(s->announce_event_source);
 
+        sd_event_source_disable_unref(s->mdns_goodbye_event_source);
+
         dns_cache_flush(&s->cache);
         dns_zone_flush(&s->zone);
 
