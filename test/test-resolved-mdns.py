@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # pylint: disable=line-too-long, disable=invalid-name
-# pylint: disable=broad-except, disable=too-many-statements
+# pylint: disable=broad-except, disable=too-many-statements, disable=broad-exception-raised
 # pylint: disable=unsupported-membership-test, disable=too-many-branches
 
 '''
@@ -15,15 +15,15 @@ import os
 import time
 import pexpect
 
-def populate_services(console, num):
+def populate_services(console, num, svcType):
     console.sendline("mkdir -p /run/systemd/dnssd/")
     expectedSet = set()
-    for i in range(num):
+    for _ in range(num):
         expectedSet.add(str(populate_services.counter))
-        filename="/run/systemd/dnssd/tst_service_" + str(i) + ".dnssd"
+        filename="/run/systemd/dnssd/tst_service_" + str(populate_services.counter) + ".dnssd"
         console.sendline("echo [Service] > " + filename)
         console.sendline("echo Name=Test Service_" + str(populate_services.counter) + " >> " + filename)
-        console.sendline("echo Type=_testService._udp >> " + filename)
+        console.sendline("echo Type="+svcType+" >> " + filename)
         console.sendline("echo Port=24002 >> " + filename)
         console.sendline("echo TxtText=DC=Monitor PN=867313 SN=XZ051Z0051 >> " + filename)
         populate_services.counter += 1
@@ -66,11 +66,11 @@ def waitForNetworkUp(console):
     if retry >= 20:
         raise Exception("Failed to configure network.\n")
 
-def checkServices(console, expectedSet):
+def checkServices(console, expectedSet, svcType):
     actualSetv4 = set()
     actualSetv6 = set()
     for _ in range(len(expectedSet) * 2):
-        console.expect('"add_flag":true,"family":(\\d+),"name":"Test Service_(\\d+)","type":"_testService._udp","domain":"local"', 30)
+        console.expect('"add_flag":true,"family":(\\d+),"name":"Test Service_(\\d+)","type":"'+svcType+'","domain":"local"', 30)
         proto = console.match.group(1)
         if '10' in proto:
             actualSetv6.add(console.match.group(2))
@@ -82,11 +82,43 @@ def checkServices(console, expectedSet):
     if actualSetv6 != expectedSet:
         raise Exception("Exception in adding services. Not all services were added.")
 
-def checkServicesRemoved(console, expectedSet):
+def checkServicesMultiple(console, expectedSet):
     actualSetv4 = set()
     actualSetv6 = set()
     for _ in range(len(expectedSet) * 2):
-        console.expect('"add_flag":false,"family":(\\d+),"name":"Test Service_(\\d+)","type":"_testService._udp","domain":"local"', 30)
+        console.expect('"add_flag":true,"family":(\\d+),"name":"Test Service_(\\d+)","type":"_testService(\\d+)._udp","domain":"local"', 30)
+        proto = console.match.group(1)
+        if '10' in proto:
+            actualSetv6.add(console.match.group(2))
+        else:
+            actualSetv4.add(console.match.group(2))
+
+    if actualSetv4 != expectedSet:
+        raise Exception("Exception in adding services. Not all services were added.")
+    if actualSetv6 != expectedSet:
+        raise Exception("Exception in adding services. Not all services were added.")
+
+def checkServicesRemoved(console, expectedSet, svcType):
+    actualSetv4 = set()
+    actualSetv6 = set()
+    for _ in range(len(expectedSet) * 2):
+        console.expect('"add_flag":false,"family":(\\d+),"name":"Test Service_(\\d+)","type":"'+svcType+'","domain":"local"', 30)
+        proto = console.match.group(1)
+        if '10' in proto:
+            actualSetv6.add(console.match.group(2))
+        else:
+            actualSetv4.add(console.match.group(2))
+
+    if actualSetv4 != expectedSet:
+        raise Exception("Exception in adding services. Not all services were removed.")
+    if actualSetv6 != expectedSet:
+        raise Exception("Exception in adding services. Not all services were removed.")
+
+def checkServicesRemovedMultiple(console, expectedSet):
+    actualSetv4 = set()
+    actualSetv6 = set()
+    for _ in range(len(expectedSet) * 2):
+        console.expect('"add_flag":false,"family":(\\d+),"name":"Test Service_(\\d+)","type":"_testService(\\d+)._udp","domain":"local"', 30)
         proto = console.match.group(1)
         if '10' in proto:
             actualSetv6.add(console.match.group(2))
@@ -234,9 +266,14 @@ def run_test(args):
         setupNetwork(console3)
         enableSystemdResolved(console3)
 
-        expectedSet1 = populate_services(console, 3)
-        expectedSet2 = populate_services(console2, 3)
-        expectedSet3 = populate_services(console3, 3)
+        num_clients = 40
+        num_consoles = 3
+        expectedSet = [set() for i in range(num_consoles*num_clients)]
+        for i in range(num_clients):
+            n = i*num_consoles
+            expectedSet[n] = populate_services(console, 3, '_testService'+str(i)+'._udp')
+            expectedSet[n+1] = populate_services(console2, 3, '_testService'+str(i)+'._udp')
+            expectedSet[n+2] = populate_services(console3, 3, '_testService'+str(i)+'._udp')
 
         # Wait for the network interface to be configured. Timeout after 20 seconds
         waitForNetworkUp(console)
@@ -253,62 +290,103 @@ def run_test(args):
         console3.expect("#", 5)
 
         # TEST 1 - call StartBrowse on console2, while all containers are publishing mDNS services.
+        # A separate call to StartBrowse is called for each service type in parallel
         logger.info("Running TEST 1")
-        console2.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
-        checkServices(console2, expectedSet1.union(expectedSet3))
-        time.sleep(3)
+
+        # 30 clients browsing for the same service type
+        idx = int(num_clients/2)
+        for i in range(30):
+            console2.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(idx)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console2, expectedSet[idx*3].union(expectedSet[idx*3+2]), '_testService'+str(idx)+'._udp')
+
+        console2.sendline('pkill -9 varlinkctl')
+
+        for i in range(num_clients):
+            expected = set()
+            expected = expectedSet[i*num_consoles].union(expectedSet[i*num_consoles+2])
+            console2.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(i)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console2, expected, '_testService'+str(i)+'._udp')
 
         # TEST 2 - testing calling startbrowse multiple times
         # this also tests service announcements on startup and service removals with goodbye packets
         logger.info("Running TEST 2")
-        console2.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\'")
-        console2.expect("Method call failed: io.systemd.System", 5)
-        console2.expect("\"errno\":16", 5)
+        expectedCon2 = set()
+        for i in range(num_clients):
+            expectedCon2 = expectedCon2.union(expectedSet[i*num_consoles])
         console.sendline("systemctl stop systemd-resolved")
         console.expect("#")
-        checkServicesRemoved(console2, expectedSet1)
+        checkServicesRemovedMultiple(console2, expectedCon2)
         console.sendline("systemctl start systemd-resolved")
         console.expect("#")
-        checkServices(console2, expectedSet1)
+        checkServicesMultiple(console2, expectedCon2)
 
-        console3.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\'")
-        checkServices(console3, expectedSet1.union(expectedSet2))
+        for i in range(num_clients):
+            expected = set()
+            expected = expectedSet[i*num_consoles].union(expectedSet[i*num_consoles+1])
+            console3.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(i)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console3, expected, '_testService'+str(i)+'._udp')
 
         # All three devices are browsing and publishing simultaneously after this
-        console.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\'")
-        checkServices(console, expectedSet2.union(expectedSet3))
+        for i in range(num_clients):
+            expected = set()
+            expected = expectedSet[i*num_consoles+1].union(expectedSet[i*num_consoles+2])
+            console.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(i)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console, expected, '_testService'+str(i)+'._udp')
 
         # TEST 3 - Network interface down
         logger.info("Running TEST 3")
+        console2.sendcontrol('c')
         console2.sendline("ip link set host0 down")
-        checkServicesRemoved(console2, expectedSet1.union(expectedSet3))
+        expectedCon2 = set()
+        for i in range(num_clients):
+            expectedCon2 = expectedCon2.union(expectedSet[i*num_consoles].union(expectedSet[i*num_consoles+2]))
+        checkServicesRemovedMultiple(console2, expectedCon2)
         console2.sendline("ip link set host0 up")
         # Takes a few seconds for the iface to get an IPv4 addr
         waitForNetworkUp(console2)
-        checkServices(console2, expectedSet1.union(expectedSet3))
+        checkServicesMultiple(console2, expectedCon2)
 
         # Restart varlinkctl to avoid timeout
         console.sendcontrol('c')
         console.expect("#", 5)
-        console.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+        console.sendline('pkill -9 varlinkctl')
+        console.expect("#", 5)
+        for i in range(num_clients):
+            expected = set()
+            expected = expectedSet[i*num_consoles+1].union(expectedSet[i*num_consoles+2])
+            console.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(i)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console, expected, '_testService'+str(i)+'._udp')
         console.sendline("ip link set host0 down")
-        checkServicesRemoved(console, expectedSet2.union(expectedSet3))
+        expectedCon = set()
+        for i in range(num_clients):
+            expectedCon = expectedCon.union(expectedSet[i*num_consoles+1].union(expectedSet[i*num_consoles+2]))
+        checkServicesRemovedMultiple(console, expectedCon)
         console.sendline("ip link set host0 up")
         # Takes a few seconds for the iface to get an IPv4 addr
         waitForNetworkUp(console)
-        checkServices(console, expectedSet2.union(expectedSet3))
+        checkServicesMultiple(console, expectedCon)
 
         # Restart varlinkctl to avoid timeout
         console3.sendcontrol('c')
         console3.expect("#", 5)
-        console3.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+        console3.sendline('pkill -9 varlinkctl')
+        console3.expect("#", 5)
+        for i in range(num_clients):
+            expected = set()
+            expected = expectedSet[i*num_consoles].union(expectedSet[i*num_consoles+1])
+            console3.sendline("varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse \'{\"domainName\":\"_testService"+str(i)+"._udp.local\",\"name\":\"\",\"type\":\"\",\"ifindex\":2,\"flags\":16785432}\' &")
+            checkServices(console3, expected, '_testService'+str(i)+'._udp')
         console3.sendline("ip link set host0 down")
-        checkServicesRemoved(console3, expectedSet1.union(expectedSet2))
+        expectedCon3 = set()
+        for i in range(num_clients):
+            expectedCon3 = expectedCon3.union(expectedSet[i*num_consoles].union(expectedSet[i*num_consoles+1]))
+        checkServicesRemovedMultiple(console3, expectedCon3)
         console3.sendline("ip link set host0 up")
         # Takes a few seconds for the iface to get an IPv4 addr
         waitForNetworkUp(console3)
-        checkServices(console3, expectedSet1.union(expectedSet2))
+        checkServicesMultiple(console3, expectedCon3)
 
+        # Wind down test setup
         console.sendcontrol('c')
         console.expect("#", 5)
         console.sendline('> /testok')

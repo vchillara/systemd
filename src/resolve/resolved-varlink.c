@@ -1109,9 +1109,6 @@ static int vl_method_start_browse(Varlink* link, JsonVariant* parameters, Varlin
         m = varlink_server_get_userdata(varlink_get_server(link));
         assert(m);
 
-        if (!hashmap_isempty(m->dns_service_browsers))
-                return varlink_error_errno(link, EBUSY);
-
         r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
         if (r < 0)
                 return log_error_errno(r, "vl_method_start_browse json_dispatch fail: %m");
