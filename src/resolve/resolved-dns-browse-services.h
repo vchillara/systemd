@@ -75,4 +75,5 @@ int dns_subscribe_browse_service(Manager *m,
                 const char * type,
                 int ifindex,
                 uint64_t flags);
-int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family, bool has_goodbye);
+int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family);
+int mdns_notify_browsers_goodbye(DnsScope *scope);

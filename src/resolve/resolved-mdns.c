@@ -349,12 +349,41 @@ static int mdns_scope_process_query(DnsScope *s, DnsPacket *p) {
         return 0;
 }
 
+static int mdns_goodbye_callback(sd_event_source *s, uint64_t usec, void *userdata) {
+        DnsScope *scope = userdata;
+        int r;
+
+        assert(s);
+        assert(scope);
+
+        scope->mdns_goodbye_event_source = sd_event_source_disable_unref(scope->mdns_goodbye_event_source);
+
+        r = mdns_notify_browsers_goodbye(scope);
+        if (r < 0)
+                log_error_errno(r, "mDNS: Failed to notify service subscribers of goodbyes, %m");
+
+        if (dns_cache_expiry_in_one_second(&scope->cache, usec)) {
+                r = sd_event_add_time_relative(
+                        scope->manager->event,
+                        &scope->mdns_goodbye_event_source,
+                        CLOCK_BOOTTIME,
+                        USEC_PER_SEC,
+                        0,
+                        mdns_goodbye_callback,
+                        scope);
+                if (r < 0)
+                        return log_error_errno(r, "mDNS: Failed to re-schedule goodbye callback: %m");
+        }
+
+        return 0;
+}
+
 static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
         Manager *m = userdata;
         DnsScope *scope;
         int r;
-        bool unsolicited_packet = true, has_goodbye = false;
+        bool unsolicited_packet = true;
 
         r = manager_recv(m, fd, DNS_PROTOCOL_MDNS, &p);
         if (r <= 0)
@@ -408,7 +437,22 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                                 log_debug("Got a goodbye packet");
                                 /* See the section 10.1 of RFC6762 */
                                 rr->ttl = 1;
-                                has_goodbye = true;
+
+                                /* Look at the cache 1 second later and remove stale entries.
+                                 * This is particularly useful to keep service browsers updated on service removal,
+                                 * as there are no other reliable triggers to propogate that info. */
+                                if (!scope->mdns_goodbye_event_source) {
+                                        r = sd_event_add_time_relative(
+                                                        scope->manager->event,
+                                                        &scope->mdns_goodbye_event_source,
+                                                        CLOCK_BOOTTIME,
+                                                        USEC_PER_SEC,
+                                                        0,
+                                                        mdns_goodbye_callback,
+                                                        scope);
+                                        if (r < 0)
+                                                return r;
+                                }
                         }
                 }
 
@@ -454,7 +498,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
 
                 /* Check incoming packet key matches with active clients if yes update the same */
                 if (unsolicited_packet)
-                        mdns_notify_browsers_unsolicited_updates(m, p->answer, p->family, has_goodbye);
+                        mdns_notify_browsers_unsolicited_updates(m, p->answer, p->family);
 
         } else if (dns_packet_validate_query(p) > 0)  {
                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));

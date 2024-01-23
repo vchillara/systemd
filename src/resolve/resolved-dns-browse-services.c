@@ -22,17 +22,6 @@ static usec_t mdns_maintenance_jitter(uint32_t ttl) {
 #define MDNS_80_PERCENT 80
 #define MDNS_5_PERCENT 5
 
-typedef struct mDnsGoodbyeParams mDnsGoodbyeParams;
-
-struct mDnsGoodbyeParams {
-        DnsServiceBrowser *sb;
-        int owner_family;
-};
-
-mDnsGoodbyeParams *mdns_goodbye_params_free(mDnsGoodbyeParams *p);
-
-DEFINE_TRIVIAL_CLEANUP_FUNC(mDnsGoodbyeParams*, mdns_goodbye_params_free);
-
 static void mdns_find_service_from_query(DnsService **service, DnsServiceBrowser *sb, DnsQuery *q) {
         assert(sb);
 
@@ -410,26 +399,33 @@ int mdns_browser_lookup_cache(DnsServiceBrowser *sb, int owner_family) {
         return mdns_manage_services_answer(sb, lookup_ret_answer, owner_family);
 }
 
-static int goodbye_callback(sd_event_source *s, uint64_t usec, void *userdata) {
-        _cleanup_(mdns_goodbye_params_freep) mDnsGoodbyeParams *cb_params = userdata;
+int mdns_notify_browsers_goodbye(DnsScope *scope) {
+        DnsServiceBrowser *sb = NULL;
         int r;
 
-        if (!cb_params->sb)
+        if (!scope)
                 return 0;
 
-        r = mdns_browser_lookup_cache(cb_params->sb, cb_params->owner_family);
-        if (r < 0)
-                return log_error_errno(r, "Failed to lookup cache: %m");
+        HASHMAP_FOREACH(sb, scope->manager->dns_service_browsers) {
+                r = mdns_browser_lookup_cache(sb, scope->family);
+                if (r < 0)
+                        goto finish;
+        }
 
         return 0;
+
+finish:
+        return r;
 }
 
-int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family, bool has_goodbye) {
-        _cleanup_(dns_service_browser_unrefp) DnsServiceBrowser *sb = NULL;
+int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family) {
+        DnsServiceBrowser *sb = NULL;
         int r;
 
-        assert(answer);
         assert(m);
+
+        if (!answer)
+                return 0;
 
         if (!m->dns_service_browsers)
                 return 0;
@@ -440,34 +436,6 @@ int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int 
                         goto finish;
                 else if (r == 0)
                         continue;
-
-                if (has_goodbye) {
-                        _cleanup_(mdns_goodbye_params_freep) mDnsGoodbyeParams *cb_params = NULL;
-
-                        cb_params = new(mDnsGoodbyeParams, 1);
-                        if (!cb_params)
-                                return log_oom();
-
-                        *cb_params = (mDnsGoodbyeParams) {
-                                .sb = dns_service_browser_ref(sb),
-                                .owner_family = owner_family,
-                        };
-
-                        r = sd_event_add_time_relative(
-                                m->event,
-                                NULL,
-                                CLOCK_BOOTTIME,
-                                USEC_PER_SEC,
-                                0,
-                                goodbye_callback,
-                                cb_params
-                        );
-                        if (r < 0)
-                                goto finish;
-
-                        TAKE_PTR(cb_params);
-                        continue;
-                }
 
                 r = mdns_browser_lookup_cache(sb, owner_family);
                 if (r < 0)
@@ -700,11 +668,3 @@ DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *sb) {
 }
 
 DEFINE_TRIVIAL_REF_UNREF_FUNC(DnsServiceBrowser, dns_service_browser, dns_service_browser_free);
-
-mDnsGoodbyeParams* mdns_goodbye_params_free(mDnsGoodbyeParams *p) {
-        if (!p)
-                return NULL;
-
-        dns_service_browser_unref(p->sb);
-        return mfree(p);
-}
