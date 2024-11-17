@@ -25,7 +25,7 @@ static usec_t mdns_maintenance_jitter(uint32_t ttl) {
         return random_u64_range(100 * 2 * ttl * (USEC_PER_SEC / 10000));
 }
 
-static void mdns_find_service_from_query(DnsService **service, DnsServiceBrowser *sb, DnsQuery *q) {
+static void mdns_find_service_from_query(DnssdDiscoveredService **service, DnsServiceBrowser *sb, DnsQuery *q) {
         assert(sb);
 
         /* Find the service that owns the query. */
@@ -41,7 +41,7 @@ static void mdns_find_service_from_query(DnsService **service, DnsServiceBrowser
 static void mdns_maintenance_query_complete(DnsQuery *q) {
         _cleanup_(dns_service_browser_unrefp) DnsServiceBrowser *sb = NULL;
         _cleanup_(dns_query_freep) DnsQuery *query = q;
-        DnsService *service = NULL;
+        DnssdDiscoveredService *service = NULL;
         int r;
 
         assert(query);
@@ -77,7 +77,7 @@ static void mdns_maintenance_query_complete(DnsQuery *q) {
 }
 
 static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userdata) {
-        DnsService *service = NULL;
+        DnssdDiscoveredService *service = NULL;
         _cleanup_(dns_query_freep) DnsQuery *q = NULL;
         int r;
 
@@ -135,13 +135,13 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
 }
 
 int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_family) {
-        _cleanup_(dns_service_unrefp) DnsService *s = NULL;
+        _cleanup_(dns_service_unrefp) DnssdDiscoveredService *s = NULL;
         int r;
 
         assert(sb);
         assert(rr);
 
-        s = new (DnsService, 1);
+        s = new (DnssdDiscoveredService, 1);
         if (!s) {
                 log_oom();
                 return -ENOMEM;
@@ -149,7 +149,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
 
         usec_t usec = now(CLOCK_BOOTTIME);
 
-        *s = (DnsService){
+        *s = (DnssdDiscoveredService){
                 .n_ref = 1,
                 .service_browser = dns_service_browser_ref(sb),
                 .rr = dns_resource_record_copy(rr),
@@ -204,7 +204,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
         return 0;
 }
 
-void dns_remove_service(DnsServiceBrowser *sb, DnsService *service) {
+void dns_remove_service(DnsServiceBrowser *sb, DnssdDiscoveredService *service) {
         assert(sb);
         assert(service);
 
@@ -212,7 +212,7 @@ void dns_remove_service(DnsServiceBrowser *sb, DnsService *service) {
         dns_service_free(service);
 }
 
-DnsService *dns_service_free(DnsService *service) {
+DnssdDiscoveredService *dns_service_free(DnssdDiscoveredService *service) {
         if (!service)
                 return NULL;
 
@@ -228,9 +228,9 @@ DnsService *dns_service_free(DnsService *service) {
         return mfree(service);
 }
 
-DEFINE_TRIVIAL_REF_UNREF_FUNC(DnsService, dns_service, dns_service_free);
+DEFINE_TRIVIAL_REF_UNREF_FUNC(DnssdDiscoveredService, dns_service, dns_service_free);
 
-int mdns_service_update(DnsService *service, DnsResourceRecord *rr, usec_t t) {
+int mdns_service_update(DnssdDiscoveredService *service, DnsResourceRecord *rr, usec_t t) {
         service->until = rr->until;
         service->rr->ttl = rr->ttl;
 
@@ -246,7 +246,7 @@ int mdns_service_update(DnsService *service, DnsResourceRecord *rr, usec_t t) {
         return 0;
 }
 
-bool dns_service_contains(DnsService *services, DnsResourceRecord *rr, int owner_family) {
+bool dns_service_contains(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family) {
         usec_t t = now(CLOCK_BOOTTIME);
 
         LIST_FOREACH(dns_services, service, services)
