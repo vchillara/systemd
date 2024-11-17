@@ -24,8 +24,6 @@ static usec_t mdns_maintenance_jitter(uint32_t ttl) {
         return random_u64_range(100 * 2 * ttl * (USEC_PER_SEC / 10000));
 }
 
-#define MDNS_80_PERCENT 80
-#define MDNS_5_PERCENT 5
 
 static void mdns_find_service_from_query(DnsService **service, DnsServiceBrowser *sb, DnsQuery *q) {
         assert(sb);
