@@ -10,14 +10,18 @@
 
 /* RFC 6762 section 5.2 - The querier should plan to issue a query at 80% of
  * the record lifetime, and then if no answer is received, at 85%, 90%, and 95%. */
-static usec_t mdns_maintenance_next_time(usec_t until, uint32_t ttl, int ttl_state) {
-        return usec_sub_unsigned(until, (20 - ttl_state * 5) * ttl * USEC_PER_SEC / 100);
+static usec_t mdns_maintenance_next_time(usec_t until, uint32_t ttl, DnsRecordTTLState ttl_state) {
+    assert(ttl_state >= DNS_RECORD_TTL_STATE_80_PERCENT);
+    assert(ttl_state <= _DNS_RECORD_TTL_STATE_MAX);
+
+    /*TODO check with vishal*/
+    return usec_sub_unsigned(until,((ttl_state / 100) * ttl * USEC_PER_SEC));
 }
 
 /* RFC 6762 section 5.2 - A random variation of 2% of the record TTL should
  * be added to maintenance queries. */
 static usec_t mdns_maintenance_jitter(uint32_t ttl) {
-        return random_u64_range(100) * 2 * ttl * USEC_PER_SEC / 10000;
+        return random_u64_range(100 * 2 * ttl * (USEC_PER_SEC / 10000));
 }
 
 #define MDNS_80_PERCENT 80
@@ -78,7 +82,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
 
         service = userdata;
 
-        if (service->rr_ttl_state++ == MDNS_TTL_100_PERCENT)
+        if (service->rr_ttl_state++ == _DNS_RECORD_TTL_STATE_MAX)
                 return mdns_browser_lookup_cache(service->sb, service->family);
 
         r = dns_query_new(service->sb->m, &q, service->sb->question_utf8, service->sb->question_idna, NULL, service->sb->ifindex, service->sb->flags);
@@ -130,7 +134,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
                 .family = owner_family,
                 .until = rr->until,
                 .query = NULL,
-                .rr_ttl_state = MDNS_TTL_80_PERCENT,
+                .rr_ttl_state = DNS_RECORD_TTL_STATE_80_PERCENT,
         };
 
         LIST_PREPEND(dns_services, sb->dns_services, s);
@@ -140,18 +144,19 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
          * If service is being added after 80% of the TTL has already elapsed,
          * schedule the next query at the next 5% increment. */
         usec_t next_time = 0;
-        while (s->rr_ttl_state <= MDNS_TTL_100_PERCENT) {
+        while (s->rr_ttl_state >= DNS_RECORD_TTL_STATE_80_PERCENT && s->rr_ttl_state <= _DNS_RECORD_TTL_STATE_MAX) {
                 next_time = mdns_maintenance_next_time(rr->until, rr->ttl, s->rr_ttl_state);
                 if (next_time >= usec)
                         break;
-                s->rr_ttl_state++;
+        /* 5% increment */
+        s->rr_ttl_state += 5;
         }
 
         if (next_time < usec) {
                 /* If next_time is still in the past, the service is being added after it has already expired.
                  * Just schedule a 100% maintenance query */
                 next_time = usec + USEC_PER_SEC;
-                s->rr_ttl_state = MDNS_TTL_100_PERCENT;
+                s->rr_ttl_state = _DNS_RECORD_TTL_STATE_MAX;
         }
 
         usec_t jitter = mdns_maintenance_jitter(rr->ttl);
@@ -203,7 +208,7 @@ int mdns_service_update(DnsService *service, DnsResourceRecord *rr, usec_t t) {
 
         /* Update the 80% TTL maintenance event based on new record received from the network.
          * RFC 6762 section 5.2  */
-        usec_t next_time = mdns_maintenance_next_time(service->until, service->rr->ttl, MDNS_TTL_80_PERCENT);
+        usec_t next_time = mdns_maintenance_next_time(service->until, service->rr->ttl, DNS_RECORD_TTL_STATE_80_PERCENT);
         usec_t jitter = mdns_maintenance_jitter(service->rr->ttl);
 
         if (service->schedule_event)

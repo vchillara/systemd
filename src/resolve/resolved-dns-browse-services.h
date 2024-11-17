@@ -13,11 +13,12 @@ typedef struct DnsService DnsService;
 typedef enum DnsRecordTTLState DnsRecordTTLState;
 
 enum DnsRecordTTLState {
-        MDNS_TTL_80_PERCENT,
-        MDNS_TTL_85_PERCENT,
-        MDNS_TTL_90_PERCENT,
-        MDNS_TTL_95_PERCENT,
-        MDNS_TTL_100_PERCENT
+    DNS_RECORD_TTL_STATE_80_PERCENT = 80,
+        DNS_RECORD_TTL_STATE_85_PERCENT = 85,
+        DNS_RECORD_TTL_STATE_90_PERCENT = 90,
+        DNS_RECORD_TTL_STATE_95_PERCENT = 95,
+        _DNS_RECORD_TTL_STATE_MAX = 100,
+    _DNS_RECORD_TTL_STATE_MAX_INVALID = -EINVAL
 };
 
 struct DnsService {
