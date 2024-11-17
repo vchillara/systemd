@@ -60,7 +60,7 @@ static void mdns_maintenance_query_complete(DnsQuery *q) {
         if (r <= 0)
                 goto finish;
 
-        r = mdns_browser_lookup_cache(sb, query->answer_family);
+        r = mdns_browser_revisit_cache(sb, query->answer_family);
 
 finish:
         if (r < 0)
@@ -81,7 +81,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
         service = userdata;
 
         if (service->rr_ttl_state++ == _DNS_RECORD_TTL_STATE_MAX)
-                return mdns_browser_lookup_cache(service->sb, service->family);
+                return mdns_browser_revisit_cache(service->sb, service->family);
 
         r = dns_query_new(service->sb->m, &q, service->sb->question_utf8, service->sb->question_idna, NULL, service->sb->ifindex, service->sb->flags);
         if (r < 0)
@@ -247,16 +247,16 @@ void dns_browse_services_purge(Manager *m, int family) {
                         goto finish;
 
                 if (family == AF_UNSPEC) {
-                        r = mdns_browser_lookup_cache(sb, AF_INET);
+                        r = mdns_browser_revisit_cache(sb, AF_INET);
                         if (r < 0)
                                 goto finish;
-                        r = mdns_browser_lookup_cache(sb, AF_INET6);
+                        r = mdns_browser_revisit_cache(sb, AF_INET6);
                         if (r < 0)
                                 goto finish;
                         return;
                 }
 
-                r = mdns_browser_lookup_cache(sb, family);
+                r = mdns_browser_revisit_cache(sb, family);
                 if (r < 0)
                         goto finish;
         }
@@ -390,7 +390,7 @@ finish:
         return sd_varlink_error_errno(sb->link, r);
 }
 
-int mdns_browser_lookup_cache(DnsServiceBrowser *sb, int owner_family) {
+int mdns_browser_revisit_cache(DnsServiceBrowser *sb, int owner_family) {
         _cleanup_(dns_answer_unrefp) DnsAnswer *lookup_ret_answer = NULL;
         DnsScope *scope;
         int r;
@@ -427,7 +427,7 @@ int mdns_notify_browsers_goodbye(DnsScope *scope) {
                 return 0;
 
         HASHMAP_FOREACH(sb, scope->manager->dns_service_browsers) {
-                r = mdns_browser_lookup_cache(sb, scope->family);
+                r = mdns_browser_revisit_cache(sb, scope->family);
                 if (r < 0)
                         goto finish;
         }
@@ -457,7 +457,7 @@ int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int 
                 else if (r == 0)
                         continue;
 
-                r = mdns_browser_lookup_cache(sb, owner_family);
+                r = mdns_browser_revisit_cache(sb, owner_family);
                 if (r < 0)
                         goto finish;
         }
@@ -489,7 +489,7 @@ static void mdns_browse_service_query_complete(DnsQuery *q) {
         else if (r == 0)
                 return;
 
-        r = mdns_browser_lookup_cache(sb, query->answer_family);
+        r = mdns_browser_revisit_cache(sb, query->answer_family);
         if (r < 0)
                 goto finish;
 
@@ -497,7 +497,7 @@ static void mdns_browse_service_query_complete(DnsQuery *q) {
          * i.e. either ipv4 or ipv6.
          * We need to perform another cache lookup for the other answer_family */
         if (query->answer_query_flags == SD_RESOLVED_FROM_CACHE) {
-                r = mdns_browser_lookup_cache(sb, query->answer_family == AF_INET? AF_INET6 : AF_INET);
+                r = mdns_browser_revisit_cache(sb, query->answer_family == AF_INET? AF_INET6 : AF_INET);
                 if (r < 0)
                         goto finish;
         }
