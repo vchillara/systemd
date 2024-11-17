@@ -4,9 +4,9 @@
 
 typedef struct DnsServiceBrowser DnsServiceBrowser;
 
-#include "sd-varlink.h"
 #include "resolved-dns-query.h"
 #include "resolved-manager.h"
+#include "sd-varlink.h"
 
 typedef struct DnsService DnsService;
 
@@ -23,7 +23,7 @@ enum DnsRecordTTLState {
 
 struct DnsService {
         unsigned n_ref;
-        DnsServiceBrowser *sb;
+        DnsServiceBrowser *service_browser;
         sd_event_source *schedule_event;
         DnsResourceRecord *rr;
         int family;
@@ -35,7 +35,7 @@ struct DnsService {
 
 struct DnsServiceBrowser {
         unsigned n_ref;
-        Manager *m;
+        Manager *manager;
         sd_varlink *link;
         DnsQuestion *question_idna;
         DnsQuestion *question_utf8;

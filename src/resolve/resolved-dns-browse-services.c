@@ -88,30 +88,30 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
         /* Check if the TTL state has reached the maximum value, then revisit
          * cache */
         if (service->rr_ttl_state++ == _DNS_RECORD_TTL_STATE_MAX)
-                return mdns_browser_revisit_cache(service->sb, service->family);
+                return mdns_browser_revisit_cache(service->service_browser, service->family);
 
         /* Create a new DNS query */
         r = dns_query_new(
-                        service->sb->m,
+                        service->service_browser->manager,
                         &q,
-                        service->sb->question_utf8,
-                        service->sb->question_idna,
+                        service->service_browser->question_utf8,
+                        service->service_browser->question_idna,
                         NULL,
-                        service->sb->ifindex,
-                        service->sb->flags);
+                        service->service_browser->ifindex,
+                        service->service_browser->flags);
         if (r < 0)
                 return log_error_errno(r, "Failed to create DNS query for maintenance: %m");
 
 
         q->complete = mdns_maintenance_query_complete;
-        q->varlink_request = sd_varlink_ref(service->sb->link);
+        q->varlink_request = sd_varlink_ref(service->service_browser->link);
         service->query = TAKE_PTR(q);
 
         /* Schedule the next maintenance query based on the TTL */
         usec_t next_time = mdns_maintenance_next_time(service->until, service->rr->ttl, service->rr_ttl_state);
 
         r = event_reset_time(
-                        service->sb->m->event,
+                        service->service_browser->manager->event,
                         &service->schedule_event,
                         CLOCK_BOOTTIME,
                         next_time,
@@ -151,7 +151,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
 
         *s = (DnsService){
                 .n_ref = 1,
-                .sb = dns_service_browser_ref(sb),
+                .service_browser = dns_service_browser_ref(sb),
                 .rr = dns_resource_record_copy(rr),
                 .family = owner_family,
                 .until = rr->until,
@@ -187,7 +187,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
         usec_t jitter = mdns_maintenance_jitter(rr->ttl);
 
         r = sd_event_add_time(
-                        sb->m->event,
+                        sb->manager->event,
                         &s->schedule_event,
                         CLOCK_BOOTTIME,
                         usec_add(next_time, jitter),
@@ -221,7 +221,7 @@ DnsService *dns_service_free(DnsService *service) {
         if (service->query && DNS_TRANSACTION_IS_LIVE(service->query->state))
                 dns_query_complete(service->query, DNS_TRANSACTION_ABORTED);
 
-        dns_service_browser_unref(service->sb);
+        dns_service_browser_unref(service->service_browser);
 
         dns_resource_record_unref(service->rr);
 
@@ -465,9 +465,9 @@ int mdns_browser_revisit_cache(DnsServiceBrowser *sb, int owner_family) {
         int r;
 
         assert(sb);
-        assert(sb->m);
+        assert(sb->manager);
 
-        scope = manager_find_scope_from_protocol(sb->m, sb->ifindex, DNS_PROTOCOL_MDNS, owner_family);
+        scope = manager_find_scope_from_protocol(sb->manager, sb->ifindex, DNS_PROTOCOL_MDNS, owner_family);
         if (!scope)
                 return 0;
 
@@ -598,7 +598,7 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
                 return log_error_errno(0, "Failed to reference service browser: %m");
 
 
-        r = dns_query_new(sb->m, &q, sb->question_utf8, sb->question_idna, NULL, sb->ifindex, sb->flags);
+        r = dns_query_new(sb->manager, &q, sb->question_utf8, sb->question_idna, NULL, sb->ifindex, sb->flags);
         if (r < 0)
                 return log_error_errno(r, "Failed to create new DNS query: %m");
 
@@ -633,7 +633,7 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
                 sb->delay = sb->delay < 2048 ? sb->delay * 2 : 3600;
 
         r = event_reset_time_relative(
-                        sb->m->event,
+                        sb->manager->event,
                         &sb->schedule_event,
                         CLOCK_BOOTTIME,
                         (sb->delay * USEC_PER_SEC),
@@ -664,7 +664,7 @@ void dns_service_browser_reset(Manager *m) {
                 sb->delay = 0;
 
                 r = event_reset_time_relative(
-                                sb->m->event,
+                                sb->manager->event,
                                 &sb->schedule_event,
                                 CLOCK_BOOTTIME,
                                 (sb->delay * USEC_PER_SEC),
@@ -732,7 +732,7 @@ int dns_subscribe_browse_service(
 
         *sb = (DnsServiceBrowser){
                 .n_ref = 1,
-                .m = m,
+                .manager = m,
                 .link = sd_varlink_ref(link),
                 .question_utf8 = dns_question_ref(question_utf8),
                 .question_idna = dns_question_ref(question_idna),
