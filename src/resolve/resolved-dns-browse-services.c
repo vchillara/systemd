@@ -311,9 +311,9 @@ int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int ow
                 r = sd_json_buildo(&entry,
                                         SD_JSON_BUILD_PAIR("add_flag", SD_JSON_BUILD_BOOLEAN(true)),
                                         SD_JSON_BUILD_PAIR("family", SD_JSON_BUILD_INTEGER(owner_family)),
-                                        SD_JSON_BUILD_PAIR("name", SD_JSON_BUILD_STRING(name?: "")),
-                                        SD_JSON_BUILD_PAIR("type", SD_JSON_BUILD_STRING(type?: "")),
-                                        SD_JSON_BUILD_PAIR("domain", SD_JSON_BUILD_STRING(domain?: "")),
+                    SD_JSON_BUILD_PAIR_CONDITION(!isempty(name), "name", SD_JSON_BUILD_STRING(name)),
+                                        SD_JSON_BUILD_PAIR_CONDITION(!isempty(type), "type", SD_JSON_BUILD_STRING(type)),
+                                        SD_JSON_BUILD_PAIR_CONDITION(!isempty(domain), "domain", SD_JSON_BUILD_STRING(domain)),
                                         SD_JSON_BUILD_PAIR("interface", SD_JSON_BUILD_INTEGER(sb->ifindex)));
                 if (r < 0)
                         goto finish;
