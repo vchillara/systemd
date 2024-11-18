@@ -25,19 +25,6 @@ static usec_t mdns_maintenance_jitter(uint32_t ttl) {
         return random_u64_range(100 * 2 * ttl * (USEC_PER_SEC / 10000));
 }
 
-static void mdns_find_service_from_query(DnssdDiscoveredService **service, DnsServiceBrowser *sb, DnsQuery *q) {
-        assert(sb);
-
-        /* Find the service that owns the query. */
-        LIST_FOREACH(dns_services, s, sb->dns_services) {
-                if (s->query == q) {
-                        *service = s;
-                        return;
-                }
-        }
-        *service = NULL;
-}
-
 static void mdns_maintenance_query_complete(DnsQuery *q) {
         _cleanup_(dns_service_browser_unrefp) DnsServiceBrowser *sb = NULL;
         _cleanup_(dns_query_freep) DnsQuery *query = q;
@@ -47,33 +34,34 @@ static void mdns_maintenance_query_complete(DnsQuery *q) {
         assert(query);
         assert(query->manager);
 
-        /* Retrieve the service browser for the query */
-        sb = dns_service_browser_ref(hashmap_get(query->manager->dns_service_browsers, query->varlink_request));
+        if (query->state != DNS_TRANSACTION_SUCCESS)
+                return;
+
+        service = dns_service_ref(query->dnsservice_request);
+
+        if (!service)
+                return;
+
+        sb = dns_service_browser_ref(service->service_browser);
+
         if (!sb)
                 return;
 
-
-        if (query->state != DNS_TRANSACTION_SUCCESS) {
-                return;
-        }
-
         r = dns_answer_match_key(query->answer, sb->key, NULL);
         if (r <= 0) {
-                log_error_errno(r, "mDNS: DNS answer does not match service browser key: %m");
+                log_error_errno(r, "mDNS answer does not match service browser key: %m");
                 return;
         }
 
 
         r = mdns_browser_revisit_cache(sb, query->answer_family);
         if (r < 0) {
-                log_error_errno(r, "mDNS: Failed to revisit cache for family %d: %m", query->answer_family);
+                log_error_errno(r, "Failed to mDNS revisit cache for family %d: %m", query->answer_family);
                 return;
         }
 
-        mdns_find_service_from_query(&service, sb, query);
-        if (service) {
-                service->query = NULL;
-        }
+        /* check memory leak */
+        service->query = NULL;
 }
 
 static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userdata) {
@@ -100,11 +88,12 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
                         service->service_browser->ifindex,
                         service->service_browser->flags);
         if (r < 0)
-                return log_error_errno(r, "Failed to create DNS query for maintenance: %m");
+                return log_error_errno(r, "Failed to create mDNS query for maintenance: %m");
 
 
         q->complete = mdns_maintenance_query_complete;
         q->varlink_request = sd_varlink_ref(service->service_browser->link);
+        q->dnsservice_request = dns_service_ref(service);
         service->query = TAKE_PTR(q);
 
         /* Schedule the next maintenance query based on the TTL */
@@ -552,7 +541,7 @@ static void mdns_browse_service_query_complete(DnsQuery *q) {
         if (query->state != DNS_TRANSACTION_SUCCESS)
                 return;
 
-        sb = dns_service_browser_ref(hashmap_get(query->manager->dns_service_browsers, query->varlink_request));
+        sb = dns_service_browser_ref(query->service_browser_request);
         if (!sb)
                 return;
 
@@ -604,7 +593,9 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
 
 
         q->complete = mdns_browse_service_query_complete;
+        q->service_browser_request = dns_service_browser_ref(sb);
         q->varlink_request = sd_varlink_ref(sb->link);
+
         if (!q->varlink_request) {
                 log_error_errno(0, "Failed to reference varlink request: %m");
                 dns_query_free(q);

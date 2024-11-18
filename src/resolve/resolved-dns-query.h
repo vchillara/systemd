@@ -11,6 +11,7 @@ typedef struct DnsQuery DnsQuery;
 typedef struct DnsStubListenerExtra DnsStubListenerExtra;
 
 #include "resolved-dns-answer.h"
+#include "resolved-dns-browse-services.h"
 #include "resolved-dns-question.h"
 #include "resolved-dns-search-domain.h"
 #include "resolved-dns-transaction.h"
@@ -90,10 +91,10 @@ struct DnsQuery {
         uint8_t n_auxiliary_queries;
         uint8_t n_cname_redirects;
 
-        bool previous_redirect_unauthenticated:1;
-        bool previous_redirect_non_confidential:1;
-        bool previous_redirect_non_synthetic:1;
-        bool request_address_valid:1;
+        bool previous_redirect_unauthenticated : 1;
+        bool previous_redirect_non_confidential : 1;
+        bool previous_redirect_non_synthetic : 1;
+        bool request_address_valid : 1;
 
         /* Bus + Varlink client information */
         sd_bus_message *bus_request;
@@ -112,12 +113,16 @@ struct DnsQuery {
         DnsStubListenerExtra *stub_listener_extra;
 
         /* Completion callback */
-        void (*complete)(DnsQuery* q);
+        void (*complete)(DnsQuery *q);
 
         sd_bus_track *bus_track;
 
         LIST_FIELDS(DnsQuery, queries);
         LIST_FIELDS(DnsQuery, auxiliary_queries);
+
+        /* Browser Service and Dnssd Discovered Service Information */
+        DnssdDiscoveredService *dnsservice_request;
+        DnsServiceBrowser *service_browser_request;
 
         /* Note: fields should be ordered to minimize alignment gaps. Use pahole! */
 };
@@ -128,13 +133,20 @@ enum {
         DNS_QUERY_CNAME,
 };
 
-DnsQueryCandidate* dns_query_candidate_ref(DnsQueryCandidate*);
-DnsQueryCandidate* dns_query_candidate_unref(DnsQueryCandidate*);
-DEFINE_TRIVIAL_CLEANUP_FUNC(DnsQueryCandidate*, dns_query_candidate_unref);
+DnsQueryCandidate *dns_query_candidate_ref(DnsQueryCandidate *);
+DnsQueryCandidate *dns_query_candidate_unref(DnsQueryCandidate *);
+DEFINE_TRIVIAL_CLEANUP_FUNC(DnsQueryCandidate *, dns_query_candidate_unref);
 
 void dns_query_candidate_notify(DnsQueryCandidate *c);
 
-int dns_query_new(Manager *m, DnsQuery **q, DnsQuestion *question_utf8, DnsQuestion *question_idna, DnsPacket *question_bypass, int family, uint64_t flags);
+int dns_query_new(
+                Manager *m,
+                DnsQuery **q,
+                DnsQuestion *question_utf8,
+                DnsQuestion *question_idna,
+                DnsPacket *question_bypass,
+                int family,
+                uint64_t flags);
 DnsQuery *dns_query_free(DnsQuery *q);
 
 int dns_query_make_auxiliary(DnsQuery *q, DnsQuery *auxiliary_for);
@@ -147,11 +159,11 @@ int dns_query_process_cname_many(DnsQuery *q);
 
 void dns_query_complete(DnsQuery *q, DnsTransactionState state);
 
-DnsQuestion* dns_query_question_for_protocol(DnsQuery *q, DnsProtocol protocol);
+DnsQuestion *dns_query_question_for_protocol(DnsQuery *q, DnsProtocol protocol);
 
-const char* dns_query_string(DnsQuery *q);
+const char *dns_query_string(DnsQuery *q);
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(DnsQuery*, dns_query_free);
+DEFINE_TRIVIAL_CLEANUP_FUNC(DnsQuery *, dns_query_free);
 
 bool dns_query_fully_authenticated(DnsQuery *q);
 bool dns_query_fully_confidential(DnsQuery *q);
@@ -160,9 +172,10 @@ bool dns_query_fully_authoritative(DnsQuery *q);
 static inline uint64_t dns_query_reply_flags_make(DnsQuery *q) {
         assert(q);
 
-        return SD_RESOLVED_FLAGS_MAKE(q->answer_protocol,
-                                      q->answer_family,
-                                      dns_query_fully_authenticated(q),
-                                      dns_query_fully_confidential(q)) |
-                (q->answer_query_flags & (SD_RESOLVED_FROM_MASK|SD_RESOLVED_SYNTHETIC));
+        return SD_RESOLVED_FLAGS_MAKE(
+                               q->answer_protocol,
+                               q->answer_family,
+                               dns_query_fully_authenticated(q),
+                               dns_query_fully_confidential(q)) |
+                        (q->answer_query_flags & (SD_RESOLVED_FROM_MASK | SD_RESOLVED_SYNTHETIC));
 }

@@ -3,12 +3,12 @@
 #pragma once
 
 typedef struct DnsServiceBrowser DnsServiceBrowser;
+typedef struct DnssdDiscoveredService DnssdDiscoveredService;
 
 #include "resolved-dns-query.h"
 #include "resolved-manager.h"
 #include "sd-varlink.h"
 
-typedef struct DnssdDiscoveredService DnssdDiscoveredService;
 
 typedef enum DnsRecordTTLState DnsRecordTTLState;
 
