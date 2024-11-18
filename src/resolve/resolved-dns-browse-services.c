@@ -765,8 +765,8 @@ DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *sb) {
         if (!sb)
                 return NULL;
 
-        LIST_FOREACH(dns_services, service, sb->dns_services)
-                dns_remove_service(sb, service);
+        while (sb->dns_services)
+                dns_remove_service(sb, sb->dns_services);
 
         sd_event_source_disable_unref(sb->schedule_event);
 
