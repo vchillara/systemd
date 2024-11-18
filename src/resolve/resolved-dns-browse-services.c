@@ -643,7 +643,7 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
         return 0;
 }
 
-void dns_service_browser_reset(Manager *m) {
+void dns_browse_services_restart(Manager *m) {
         int r;
 
         if (!(m && m->dns_service_browsers))

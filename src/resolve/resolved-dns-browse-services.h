@@ -59,7 +59,7 @@ DnssdDiscoveredService *dns_service_ref(DnssdDiscoveredService *service);
 DnssdDiscoveredService *dns_service_unref(DnssdDiscoveredService *service);
 
 void dns_browse_services_purge(Manager *m, int family);
-void dns_service_browser_reset(Manager *m);
+void dns_browse_services_restart(Manager *m);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServiceBrowser *, dns_service_browser_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnssdDiscoveredService *, dns_service_unref);
