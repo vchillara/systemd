@@ -3,38 +3,39 @@
 #pragma once
 
 typedef struct DnsServiceBrowser DnsServiceBrowser;
+typedef struct DnssdDiscoveredService DnssdDiscoveredService;
 
 #include "resolved-dns-query.h"
 #include "resolved-manager.h"
 #include "sd-varlink.h"
 
-typedef struct DnsService DnsService;
 
 typedef enum DnsRecordTTLState DnsRecordTTLState;
 
 enum DnsRecordTTLState {
-        MDNS_TTL_80_PERCENT,
-        MDNS_TTL_85_PERCENT,
-        MDNS_TTL_90_PERCENT,
-        MDNS_TTL_95_PERCENT,
-        MDNS_TTL_100_PERCENT
+        DNS_RECORD_TTL_STATE_80_PERCENT,
+        DNS_RECORD_TTL_STATE_85_PERCENT,
+        DNS_RECORD_TTL_STATE_90_PERCENT,
+        DNS_RECORD_TTL_STATE_95_PERCENT,
+        _DNS_RECORD_TTL_STATE_MAX,
+        _DNS_RECORD_TTL_STATE_MAX_INVALID = -EINVAL
 };
 
-struct DnsService {
+struct DnssdDiscoveredService {
         unsigned n_ref;
-        DnsServiceBrowser *sb;
+        DnsServiceBrowser *service_browser;
         sd_event_source *schedule_event;
         DnsResourceRecord *rr;
         int family;
         usec_t until;
         DnsRecordTTLState rr_ttl_state;
         DnsQuery *query;
-        LIST_FIELDS(DnsService, dns_services);
+        LIST_FIELDS(DnssdDiscoveredService, dns_services);
 };
 
 struct DnsServiceBrowser {
         unsigned n_ref;
-        Manager *m;
+        Manager *manager;
         sd_varlink *link;
         DnsQuestion *question_idna;
         DnsQuestion *question_utf8;
@@ -44,35 +45,35 @@ struct DnsServiceBrowser {
         DnsResourceKey *key;
         int ifindex;
         uint64_t token;
-        LIST_HEAD(DnsService, dns_services);
+        LIST_HEAD(DnssdDiscoveredService, dns_services);
 };
 
 DnsServiceBrowser *dns_service_browser_free(DnsServiceBrowser *sb);
-void dns_remove_service(DnsServiceBrowser *sb, DnsService *service);
-DnsService *dns_service_free(DnsService *service);
+void dns_remove_service(DnsServiceBrowser *sb, DnssdDiscoveredService *service);
+DnssdDiscoveredService *dns_service_free(DnssdDiscoveredService *service);
 
-DnsServiceBrowser* dns_service_browser_ref(DnsServiceBrowser *sb);
-DnsServiceBrowser* dns_service_browser_unref(DnsServiceBrowser *sb);
+DnsServiceBrowser *dns_service_browser_ref(DnsServiceBrowser *sb);
+DnsServiceBrowser *dns_service_browser_unref(DnsServiceBrowser *sb);
 
-DnsService* dns_service_ref(DnsService *service);
-DnsService* dns_service_unref(DnsService *service);
+DnssdDiscoveredService *dns_service_ref(DnssdDiscoveredService *service);
+DnssdDiscoveredService *dns_service_unref(DnssdDiscoveredService *service);
 
 void dns_browse_services_purge(Manager *m, int family);
-void dns_service_browser_reset(Manager *m);
+void dns_browse_services_restart(Manager *m);
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServiceBrowser*, dns_service_browser_unref);
-DEFINE_TRIVIAL_CLEANUP_FUNC(DnsService*, dns_service_unref);
+DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServiceBrowser *, dns_service_browser_unref);
+DEFINE_TRIVIAL_CLEANUP_FUNC(DnssdDiscoveredService *, dns_service_unref);
 
-bool dns_service_contains(DnsService *services, DnsResourceRecord *rr, int owner_family);
+bool dns_service_contains(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family);
 int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int owner_family);
 int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_family);
-int mdns_service_update(DnsService *service, DnsResourceRecord *rr, usec_t t);
-int mdns_browser_lookup_cache(DnsServiceBrowser *sb, int owner_family);
-int dns_subscribe_browse_service(Manager *m,
+int mdns_service_update(DnssdDiscoveredService *service, DnsResourceRecord *rr, usec_t t);
+int mdns_browser_revisit_cache(DnsServiceBrowser *sb, int owner_family);
+int dns_subscribe_browse_service(
+                Manager *m,
                 sd_varlink *link,
                 const char *domain,
-                const char * name,
-                const char * type,
+                const char *type,
                 int ifindex,
                 uint64_t flags);
 int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family);

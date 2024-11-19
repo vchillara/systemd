@@ -31,24 +31,16 @@ typedef struct LookupParametersResolveService {
         uint64_t flags;
 } LookupParametersResolveService;
 
-typedef struct LookupParametersMdnsBrowse {
-        char *domainName;
-        char *name;
-        char *type;
+typedef struct LookupParametersBrowse {
+        const char *domain;
+        const char *type;
         int ifindex;
         uint64_t flags;
-} LookupParametersMdnsBrowse;
+} LookupParametersBrowse;
 
 static void lookup_parameters_destroy(LookupParameters *p) {
         assert(p);
         free(p->name);
-}
-
-static void lookup_parameters_mdns_destroy(LookupParametersMdnsBrowse *p) {
-        assert(p);
-        free(p->domainName);
-        free(p->name);
-        free(p->type);
 }
 
 static int reply_query_state(DnsQuery *q) {
@@ -1281,17 +1273,16 @@ static int verify_polkit(sd_varlink *link, sd_json_variant *parameters, const ch
                                 &m->polkit_registry);
 }
 
-static int vl_method_start_browse(sd_varlink* link, sd_json_variant* parameters, sd_varlink_method_flags_t flags, void* userdata) {
+static int vl_method_browse_services(sd_varlink* link, sd_json_variant* parameters, sd_varlink_method_flags_t flags, void* userdata) {
         static const sd_json_dispatch_field dispatch_table[] = {
-                { "domainName", SD_JSON_VARIANT_STRING,        sd_json_dispatch_string, offsetof(LookupParametersMdnsBrowse, domainName), SD_JSON_MANDATORY },
-                { "name",       SD_JSON_VARIANT_STRING,        sd_json_dispatch_string, offsetof(LookupParametersMdnsBrowse, name),       0              },
-                { "type",       SD_JSON_VARIANT_STRING,        sd_json_dispatch_string, offsetof(LookupParametersMdnsBrowse, type),       0              },
-                { "ifindex",    _SD_JSON_VARIANT_TYPE_INVALID, sd_json_dispatch_int,    offsetof(LookupParametersMdnsBrowse, ifindex),    SD_JSON_MANDATORY },
-                { "flags",      _SD_JSON_VARIANT_TYPE_INVALID, sd_json_dispatch_uint64, offsetof(LookupParametersMdnsBrowse, flags),      SD_JSON_MANDATORY },
+                { "domain",  SD_JSON_VARIANT_STRING,        sd_json_dispatch_const_string, offsetof(LookupParametersBrowse, domain),  0 },
+                { "type",    SD_JSON_VARIANT_STRING,        sd_json_dispatch_const_string, offsetof(LookupParametersBrowse, type),    0 },
+                { "ifindex", _SD_JSON_VARIANT_TYPE_INVALID, sd_json_dispatch_int,          offsetof(LookupParametersBrowse, ifindex), 0 },
+                { "flags",   _SD_JSON_VARIANT_TYPE_INVALID, sd_json_dispatch_uint64,       offsetof(LookupParametersBrowse, flags),   0 },
                 {}
         };
 
-        _cleanup_(lookup_parameters_mdns_destroy) LookupParametersMdnsBrowse p = {};
+        LookupParametersBrowse p = {};
         Manager *m;
         int r = 0;
 
@@ -1306,12 +1297,12 @@ static int vl_method_start_browse(sd_varlink* link, sd_json_variant* parameters,
 
         r = sd_varlink_dispatch(link, parameters, dispatch_table, &p);
         if (r < 0)
-                return log_error_errno(r, "vl_method_start_browse json_dispatch fail: %m");
+                return log_error_errno(r, "Failed vl_method_browse_services json dispatch: %m");
 
         if (!validate_and_mangle_flags(NULL, &p.flags, 0))
-                return sd_varlink_error_invalid_parameter(link, JSON_VARIANT_STRING_CONST("flags"));
+                return sd_varlink_error_invalid_parameter_name(link, "flags");
 
-        r = dns_subscribe_browse_service(m, link, p.domainName, p.name, p.type, p.ifindex, p.flags);
+        r = dns_subscribe_browse_service(m, link, p.domain, p.type, p.ifindex, p.flags);
         if (r < 0)
                 return sd_varlink_error_errno(link, r);
 
@@ -1532,7 +1523,7 @@ static int varlink_main_server_init(Manager *m) {
                         "io.systemd.Resolve.ResolveAddress",  vl_method_resolve_address,
                         "io.systemd.Resolve.ResolveService",  vl_method_resolve_service,
                         "io.systemd.Resolve.ResolveRecord",   vl_method_resolve_record,
-                        "io.systemd.Resolve.StartBrowse", vl_method_start_browse);
+                        "io.systemd.Resolve.BrowseServices",  vl_method_browse_services);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 

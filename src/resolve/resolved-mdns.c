@@ -361,7 +361,7 @@ static int mdns_goodbye_callback(sd_event_source *s, uint64_t usec, void *userda
 
         r = mdns_notify_browsers_goodbye(scope);
         if (r < 0)
-                log_error_errno(r, "mDNS: Failed to notify service subscribers of goodbyes, %m");
+                log_warning_errno(r, "mDNS: Failed to notify service subscribers of goodbyes, ignoring:  %m");
 
         if (dns_cache_expiry_in_one_second(&scope->cache, usec)) {
                 r = sd_event_add_time_relative(
@@ -369,11 +369,11 @@ static int mdns_goodbye_callback(sd_event_source *s, uint64_t usec, void *userda
                         &scope->mdns_goodbye_event_source,
                         CLOCK_BOOTTIME,
                         USEC_PER_SEC,
-                        0,
+                        /* accuracy= */ 0,
                         mdns_goodbye_callback,
                         scope);
                 if (r < 0)
-                        return log_error_errno(r, "mDNS: Failed to re-schedule goodbye callback: %m");
+                        return log_warning_errno(r, "mDNS: Failed to re-schedule goodbye callback, ignoring: %m");
         }
 
         return 0;
@@ -451,7 +451,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                                                         &scope->mdns_goodbye_event_source,
                                                         CLOCK_BOOTTIME,
                                                         USEC_PER_SEC,
-                                                        0,
+                                                        /* accuracy= */ 0,
                                                         mdns_goodbye_callback,
                                                         scope);
                                         if (r < 0)
@@ -461,19 +461,19 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                 }
 
                 dns_cache_put(
-                        &scope->cache,
-                        scope->manager->enable_cache,
-                        DNS_PROTOCOL_MDNS,
-                        NULL,
-                        DNS_PACKET_RCODE(p),
-                        p->answer,
-                        NULL,
-                        false,
-                        _DNSSEC_RESULT_INVALID,
-                        UINT32_MAX,
-                        p->family,
-                        &p->sender,
-                        scope->manager->stale_retention_usec);
+                                &scope->cache,
+                                scope->manager->enable_cache,
+                                DNS_PROTOCOL_MDNS,
+                                /* key= */ NULL,
+                                DNS_PACKET_RCODE(p),
+                                p->answer,
+                                /* full_packet= */ NULL,
+                                false,
+                                _DNSSEC_RESULT_INVALID,
+                                /* nsec_ttl= */ UINT32_MAX,
+                                p->family,
+                                &p->sender,
+                                scope->manager->stale_retention_usec);
 
                 for (bool match = true; match;) {
                         match = false;
@@ -500,7 +500,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                         }
                 }
 
-                /* Check incoming packet key matches with active clients if yes update the same */
+                /* Check if incoming packet key matches with active browse clients. If yes, update the same */
                 if (unsolicited_packet)
                         mdns_notify_browsers_unsolicited_updates(m, p->answer, p->family);
 

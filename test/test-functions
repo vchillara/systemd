@@ -3215,10 +3215,18 @@ test_create_image() {
 }
 
 test_setup() {
+    echo "NO_BUILD: ${NO_BUILD:-empty}"
+    echo "TEST_REQUIRE_INSTALL_TESTS: ${TEST_REQUIRE_INSTALL_TESTS:-empty}"
+    echo "BUILD_DIR: ${BUILD_DIR:-empty}"
+    command -v meson
+    meson configure "${BUILD_DIR:?}" > /tmp/meson_configure_output.txt
+    value="$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')"
     if ! get_bool "$NO_BUILD" && \
          get_bool "${TEST_REQUIRE_INSTALL_TESTS:?}" && \
          command -v meson >/dev/null && \
-         [[ "$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')" != "true" ]]; then
+         [[ "$value" != "true" ]]; then
+        echo "Output of meson configure check: ${value}"
+
         dfatal "$BUILD_DIR needs to be built with -Dinstall-tests=true"
         exit 1
     fi

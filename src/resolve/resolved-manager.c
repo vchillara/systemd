@@ -1711,7 +1711,7 @@ void manager_flush_caches(Manager *m, int log_level) {
                 dns_cache_flush(&scope->cache);
 
         dns_browse_services_purge(m, AF_UNSPEC); /* Clear records of DNS service browse subscriber, since caches are flushed */
-        dns_service_browser_reset(m);
+        dns_browse_services_restart(m);
 
         log_full(log_level, "Flushed all caches.");
 }
