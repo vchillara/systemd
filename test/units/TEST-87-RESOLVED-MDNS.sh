@@ -114,10 +114,10 @@ run_and_check_services() {
     error_file="$(mktemp)"
     tmp_file="$(mktemp)"
     service_type="_testService$service_id._udp"
-    parameters="{ \"domainName\": \"$service_type.local\", \"name\": \"\", \"type\": \"\", \"ifindex\": ${BRIDGE_INDEX:?}, \"flags\": 16785432 }"
+    parameters="{ \"domain\": \"$service_type.local\", \"type\": \"\", \"ifindex\": ${BRIDGE_INDEX:?}, \"flags\": 16785432 }"
 
     systemd-run --unit="$unit_name" --service-type=exec -p StandardOutput="file:$out_file" -p StandardError="file:$error_file" \
-        varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.StartBrowse "$parameters"
+        varlinkctl call --more /run/systemd/resolve/io.systemd.Resolve io.systemd.Resolve.BrowseServices "$parameters"
 
     # shellcheck disable=SC2064
     # Note: unregister the trap once it's fired, otherwise it'll get propagated to functions that call this
@@ -131,7 +131,7 @@ run_and_check_services() {
         # {
         #   "browser_service_data": [
         #     {
-        #       "add_flag": true,
+        #       "updateFlag": true,
         #       "family": 10,
         #       "name": "Test Service 13 on test-mdns-1",
         #       "type": "_testService0._udp",
@@ -144,7 +144,7 @@ run_and_check_services() {
         if [[ -s "$out_file" ]]; then
             # Extract the service name from each valid record...
             # jq --slurp --raw-output \
-            #     ".[].browser_service_data[] | select(.add_flag == true and .type == \"$service_type\" and .family == 10).name" "$out_file" | sort | tee "$tmp_file"
+            #     ".[].browser_service_data[] | select(.updateFlag == true and .type == \"$service_type\" and .family == 10).name" "$out_file" | sort | tee "$tmp_file"
             grep -o '"name":"[^"]*"' "$out_file" | sed 's/"name":"//;s/"//g' | sort | tee "$tmp_file"
 	    # ...and compare them with what we expect
             if "$check_func" "$service_id" "$tmp_file"; then

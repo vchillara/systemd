@@ -9,15 +9,14 @@ typedef struct DnssdDiscoveredService DnssdDiscoveredService;
 #include "resolved-manager.h"
 #include "sd-varlink.h"
 
-
 typedef enum DnsRecordTTLState DnsRecordTTLState;
 
 enum DnsRecordTTLState {
-        DNS_RECORD_TTL_STATE_80_PERCENT = 80,
-        DNS_RECORD_TTL_STATE_85_PERCENT = 85,
-        DNS_RECORD_TTL_STATE_90_PERCENT = 90,
-        DNS_RECORD_TTL_STATE_95_PERCENT = 95,
-        _DNS_RECORD_TTL_STATE_MAX = 100,
+        DNS_RECORD_TTL_STATE_80_PERCENT,
+        DNS_RECORD_TTL_STATE_85_PERCENT,
+        DNS_RECORD_TTL_STATE_90_PERCENT,
+        DNS_RECORD_TTL_STATE_95_PERCENT,
+        _DNS_RECORD_TTL_STATE_MAX,
         _DNS_RECORD_TTL_STATE_MAX_INVALID = -EINVAL
 };
 
@@ -73,7 +72,6 @@ int dns_subscribe_browse_service(
                 Manager *m,
                 sd_varlink *link,
                 const char *domain,
-                const char *name,
                 const char *type,
                 int ifindex,
                 uint64_t flags);

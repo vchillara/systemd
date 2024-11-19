@@ -102,14 +102,26 @@ static SD_VARLINK_DEFINE_STRUCT_TYPE(
                 SD_VARLINK_DEFINE_FIELD(ifindex, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_FIELD(name, SD_VARLINK_STRING, 0));
 
+static SD_VARLINK_DEFINE_ENUM_TYPE(
+                BrowseServiceUpdateFlag,
+                SD_VARLINK_FIELD_COMMENT("Indicates that the service was added."),
+                SD_VARLINK_DEFINE_ENUM_VALUE(added),
+                SD_VARLINK_FIELD_COMMENT("Indicates that the service was removed."),
+                SD_VARLINK_DEFINE_ENUM_VALUE(removed));
+
 static SD_VARLINK_DEFINE_STRUCT_TYPE(
                 ServiceData,
-                SD_VARLINK_DEFINE_FIELD(add_flag, SD_VARLINK_BOOL, 0),
+                SD_VARLINK_DEFINE_FIELD_BY_TYPE(updateFlag, BrowseServiceUpdateFlag, 0),
+                SD_VARLINK_FIELD_COMMENT("The address family of the service, one of AF_INET or AF_INET6."),
                 SD_VARLINK_DEFINE_FIELD(family, SD_VARLINK_INT, 0),
+                SD_VARLINK_FIELD_COMMENT("The name of the service, e.g., 'My Service'. May be null if not specified."),
                 SD_VARLINK_DEFINE_FIELD(name, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("The type of service, e.g., '_http._tcp'."),
                 SD_VARLINK_DEFINE_FIELD(type, SD_VARLINK_STRING, 0),
+                SD_VARLINK_FIELD_COMMENT("The domain in which the service resides, e.g., 'local'."),
                 SD_VARLINK_DEFINE_FIELD(domain, SD_VARLINK_STRING, 0),
-                SD_VARLINK_DEFINE_FIELD(interface, SD_VARLINK_INT, 0));
+                SD_VARLINK_FIELD_COMMENT("The Linux interface index for the network interface associated with this service."),
+                SD_VARLINK_DEFINE_FIELD(ifindex, SD_VARLINK_INT, 0));
 
 static SD_VARLINK_DEFINE_METHOD(
                 ResolveAddress,
@@ -168,14 +180,19 @@ static SD_VARLINK_DEFINE_METHOD(
                 SD_VARLINK_DEFINE_OUTPUT_BY_TYPE(rrs, ResolvedRecord, SD_VARLINK_ARRAY),
                 SD_VARLINK_DEFINE_OUTPUT(flags, SD_VARLINK_INT, 0));
 
-static SD_VARLINK_DEFINE_METHOD(
-                StartBrowse,
-                SD_VARLINK_DEFINE_INPUT(domainName, SD_VARLINK_STRING, 0),
-                SD_VARLINK_DEFINE_INPUT(name, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+static SD_VARLINK_DEFINE_METHOD_FULL(
+                BrowseServices,
+                SD_VARLINK_SUPPORTS_MORE,
+                SD_VARLINK_FIELD_COMMENT("The domain to browse for services. If null, the default browsing domain local is used."),
+                SD_VARLINK_DEFINE_INPUT(domain, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("The service type to browse for (e.g., '_http._tcp')."),
                 SD_VARLINK_DEFINE_INPUT(type, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
-                SD_VARLINK_DEFINE_INPUT(ifindex, SD_VARLINK_INT, 0),
-                SD_VARLINK_DEFINE_INPUT(flags, SD_VARLINK_INT, 0),
-                SD_VARLINK_DEFINE_OUTPUT_BY_TYPE(browser_service_data, ServiceData, SD_VARLINK_ARRAY));
+                SD_VARLINK_FIELD_COMMENT("The Linux interface index for the network interface to search on."),
+                SD_VARLINK_DEFINE_INPUT(ifindex, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Various browsing flags to modify the operation."),
+                SD_VARLINK_DEFINE_INPUT(flags, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("An array of service data containing information about discovered services."),
+                SD_VARLINK_DEFINE_OUTPUT_BY_TYPE(browserServiceData, ServiceData, SD_VARLINK_ARRAY));
 
 static SD_VARLINK_DEFINE_ERROR(NoNameServers);
 static SD_VARLINK_DEFINE_ERROR(NoSuchResourceRecord);
@@ -216,8 +233,8 @@ SD_VARLINK_DEFINE_INTERFACE(
                 &vl_method_ResolveService,
                 SD_VARLINK_SYMBOL_COMMENT("Resolves a domain name to one or more DNS resource records."),
                 &vl_method_ResolveRecord,
-                SD_VARLINK_SYMBOL_COMMENT("Starts browsing for mDNS services of specified type."),
-                &vl_method_StartBrowse,
+                SD_VARLINK_SYMBOL_COMMENT("Starts browsing for DNS-SD services of specified type."),
+                &vl_method_BrowseServices,
                 SD_VARLINK_SYMBOL_COMMENT("Encapsulates a resolved address."),
                 &vl_type_ResolvedAddress,
                 SD_VARLINK_SYMBOL_COMMENT("Encapsulates a resolved host name."),
@@ -232,6 +249,9 @@ SD_VARLINK_DEFINE_INTERFACE(
                 &vl_type_ResourceRecord,
                 SD_VARLINK_SYMBOL_COMMENT("Encapsulates information about a resolved DNS resource record "),
                 &vl_type_ResolvedRecord,
+                SD_VARLINK_SYMBOL_COMMENT("Describes the update flag for browsing services, indicating whether a service was added or removed during browsing."),
+                &vl_type_BrowseServiceUpdateFlag,
+                SD_VARLINK_SYMBOL_COMMENT("Encapsulates the service data obtained from browsing."),
                 &vl_type_ServiceData,
                 &vl_error_NoNameServers,
                 &vl_error_NoSuchResourceRecord,
