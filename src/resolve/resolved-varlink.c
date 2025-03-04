@@ -1239,7 +1239,7 @@ static int vl_method_browse_services(sd_varlink* link, sd_json_variant* paramete
         if (r < 0)
                 return log_error_errno(r, "Failed vl_method_browse_services json dispatch: %m");
 
-        if (!validate_and_mangle_flags(NULL, &p.flags, 0))
+        if (validate_and_mangle_query_flags(m, &p.flags, /* name = */ NULL, /* ok = */ 0))
                 return sd_varlink_error_invalid_parameter_name(link, "flags");
 
         r = dns_subscribe_browse_service(m, link, p.domain, p.type, p.ifindex, p.flags);
