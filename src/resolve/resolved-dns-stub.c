@@ -144,12 +144,12 @@ static int reply_add_with_rrsig(
         assert(reply);
         assert(rr);
 
-        r = dns_answer_add_extend(reply, rr, ifindex, flags, rrsig);
+        r = dns_answer_add_extend(reply, rr, ifindex, flags, rrsig, USEC_INFINITY);
         if (r < 0)
                 return r;
 
         if (with_rrsig && rrsig) {
-                r = dns_answer_add_extend(reply, rrsig, ifindex, flags, NULL);
+                r = dns_answer_add_extend(reply, rrsig, ifindex, flags, NULL, USEC_INFINITY);
                 if (r < 0)
                         return r;
         }

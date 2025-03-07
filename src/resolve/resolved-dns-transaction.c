@@ -2819,7 +2819,7 @@ static int dns_transaction_validate_dnskey_by_ds(DnsTransaction *t) {
                         continue;
 
                 /* If so, the DNSKEY is validated too. */
-                r = dns_answer_add_extend(&t->validated_keys, item->rr, item->ifindex, item->flags|DNS_ANSWER_AUTHENTICATED, item->rrsig);
+                r = dns_answer_add_extend(&t->validated_keys, item->rr, item->ifindex, item->flags|DNS_ANSWER_AUTHENTICATED, item->rrsig, USEC_INFINITY);
                 if (r < 0)
                         return r;
         }
