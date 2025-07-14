@@ -18,7 +18,7 @@ TEST(mdns_maintenance_next_time) {
         uint32_t ttl = 100;     /* Example TTL */
 
         /* Test for each TTL state */
-        for (DnsRecordTTLState state = DNS_RECORD_TTL_STATE_80_PERCENT; state <= _DNS_RECORD_TTL_STATE_MAX; state++) {
+        for (DnsRecordTTLState state = DNS_RECORD_TTL_STATE_80_PERCENT; state < _DNS_RECORD_TTL_STATE_MAX; state++) {
                 usec_t expected = usec_sub_unsigned(until, (20 - state * 5) * ttl * USEC_PER_SEC / 100);
                 usec_t result = mdns_maintenance_next_time(until, ttl, state);
                 ASSERT_EQ(result, expected);

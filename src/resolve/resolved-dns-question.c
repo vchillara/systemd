@@ -421,7 +421,6 @@ int dns_question_new_reverse(DnsQuestion **ret, int family, const union in_addr_
 }
 
 int dns_question_new_service_pointer(DnsQuestion **ret, const char *type, const char *domain, bool convert_idna) {
-
         _cleanup_(dns_resource_key_unrefp) DnsResourceKey *key = NULL;
         _cleanup_(dns_question_unrefp) DnsQuestion *q = NULL;
         _cleanup_free_ char *buf = NULL, *joined = NULL;

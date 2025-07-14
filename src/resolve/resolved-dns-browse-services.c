@@ -33,14 +33,14 @@ DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(browse_service_update_event, Browse
  * The intervals between successive queries MUST increase by at least a
  * factor of two. When the interval between queries reaches or exceeds
  * 60 minutes, perform subsequent queries at a steady-state rate of one
- * query per hour */
+ * query per hour. */
 usec_t mdns_calculate_next_query_delay(usec_t current_delay) {
-        assert(current_delay <= (3600 * USEC_PER_SEC));
+        assert(current_delay <= 60 * 60 * USEC_PER_SEC);
 
         if (current_delay == 0)
                 return USEC_PER_SEC;
 
-        return current_delay < (2048 * USEC_PER_SEC) ? (current_delay * 2) : (3600 * USEC_PER_SEC);
+        return current_delay < 60 * 60 / 2 * USEC_PER_SEC ? current_delay * 2 : 60 * 60 * USEC_PER_SEC;
 }
 
 /* RFC 6762 section 5.2
@@ -56,7 +56,7 @@ static inline int DNS_RECORD_TTL_STATE_TO_PERCENT(DnsRecordTTLState ttl_state) {
                 return 90;
         case DNS_RECORD_TTL_STATE_95_PERCENT:
                 return 95;
-        case _DNS_RECORD_TTL_STATE_MAX:
+        case DNS_RECORD_TTL_STATE_100_PERCENT:
                 return 100;
         default:
                 return -1;
@@ -65,7 +65,7 @@ static inline int DNS_RECORD_TTL_STATE_TO_PERCENT(DnsRecordTTLState ttl_state) {
 
 usec_t mdns_maintenance_next_time(usec_t until, uint32_t ttl, DnsRecordTTLState ttl_state) {
         assert(ttl_state >= DNS_RECORD_TTL_STATE_80_PERCENT);
-        assert(ttl_state <= _DNS_RECORD_TTL_STATE_MAX);
+        assert(ttl_state < _DNS_RECORD_TTL_STATE_MAX);
 
         int percent = DNS_RECORD_TTL_STATE_TO_PERCENT(ttl_state);
         assert(percent > 0);
@@ -101,15 +101,14 @@ static void mdns_maintenance_query_complete(DnsQuery *q) {
                 return;
 
         r = dns_answer_match_key(query->answer, sb->key, NULL);
-        if (r <= 0) {
-                if (r < 0)
-                        log_error_errno(r, "mDNS answer does not match service browser key: %m");
+        if (r < 0)
+                return (void) log_error_errno(r, "mDNS answer does not match service browser key: %m");
+        if (r == 0)
                 return;
-        }
 
         r = mdns_browser_revisit_cache(sb, query->answer_family);
         if (r < 0) {
-                log_error_errno(r, "Failed to mDNS revisit cache for family %s: %m", af_to_name(query->answer_family));
+                log_error_errno(r, "Failed to revisit cache for family %s: %m", af_to_name(query->answer_family));
                 return;
         }
 }
@@ -121,7 +120,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
 
         /* Check if the TTL state has reached the maximum value, then revisit
          * cache */
-        if (service->rr_ttl_state++ == _DNS_RECORD_TTL_STATE_MAX)
+        if (service->rr_ttl_state++ == DNS_RECORD_TTL_STATE_100_PERCENT)
                 return mdns_browser_revisit_cache(service->service_browser, service->family);
 
         /* Create a new DNS query */
@@ -198,7 +197,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
          * increment. */
         usec_t next_time = 0;
         while (s->rr_ttl_state >= DNS_RECORD_TTL_STATE_80_PERCENT &&
-               s->rr_ttl_state <= _DNS_RECORD_TTL_STATE_MAX) {
+               s->rr_ttl_state < _DNS_RECORD_TTL_STATE_MAX) {
                 next_time = mdns_maintenance_next_time(s->until, s->rr->ttl, s->rr_ttl_state);
                 if (next_time >= usec)
                         break;
@@ -209,9 +208,9 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
         if (next_time < usec) {
                 /* If next_time is still in the past, the service is being added
                  * after it has already expired. Just schedule a 100%
-                 * maintenance query */
+                 * maintenance query. */
                 next_time = usec + USEC_PER_SEC;
-                s->rr_ttl_state = _DNS_RECORD_TTL_STATE_MAX;
+                s->rr_ttl_state = DNS_RECORD_TTL_STATE_100_PERCENT;
         }
 
         usec_t jitter = mdns_maintenance_jitter(rr->ttl);
@@ -227,8 +226,7 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
         if (r < 0)
                 return log_error_errno(
                                 r,
-                                "Failed to schedule mDNS maintenance query "
-                                "for DNS service: %m");
+                                "Failed to schedule mDNS maintenance query for DNS service: %m");
 
         TAKE_PTR(s);
         return 0;
@@ -267,30 +265,35 @@ int mdns_service_update(DnssdDiscoveredService *service, DnsResourceRecord *rr, 
 
         /* Update the 80% TTL maintenance event based on new record received
          * from the network. RFC 6762 section 5.2  */
-        usec_t next_time = mdns_maintenance_next_time(
+        if (service->schedule_event) {
+                usec_t next_time = mdns_maintenance_next_time(
                         service->until, service->rr->ttl, DNS_RECORD_TTL_STATE_80_PERCENT);
-        usec_t jitter = mdns_maintenance_jitter(service->rr->ttl);
+                usec_t jitter = mdns_maintenance_jitter(service->rr->ttl);
 
-        if (service->schedule_event)
                 return sd_event_source_set_time(service->schedule_event, usec_add(next_time, jitter));
+        }
 
         return 0;
 }
 
-bool dns_service_contains(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family, usec_t until) {
+bool dns_service_match_and_update(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family, usec_t until) {
         usec_t t = now(CLOCK_BOOTTIME);
 
-        LIST_FOREACH(dns_services, service, services) {
-                if (dns_resource_record_equal(rr, service->rr) > 0 && service->family == owner_family) {
+        /* Check if a discovered service matching the given resource record and owner family exists in the list.
+        * If found, update the service's expiration time if the new 'until' is later, unless the TTL is <= 1 (goodbye packet).
+        * Return true if a matching service is found, false otherwise. */
+
+        LIST_FOREACH(dns_services, service, services)
+                if (dns_resource_record_equal(service->rr, rr) > 0 && service->family == owner_family) {
                         if (rr->ttl <= 1)
                                 return true;
 
-                        if (until > service->until)
+                        if (service->until < until)
                                 mdns_service_update(service, rr, t, until);
 
                         return true;
                 }
-        }
+
         return false;
 }
 
@@ -299,35 +302,25 @@ void dns_browse_services_purge(Manager *m, int family) {
 
         /* Called after caches are flushed.
          * Clear local service records and notify varlink client. */
-        if (!(m && m->dns_service_browsers))
+        if (!m)
                 return;
 
         DnsServiceBrowser *sb;
         HASHMAP_FOREACH(sb, m->dns_service_browsers) {
                 r = sd_event_source_set_enabled(sb->schedule_event, SD_EVENT_OFF);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to disable event source for service browser: %m");
-                        return;
+                if (r < 0)
+                        log_error_errno(r, "Failed to disable event source for service browser, ignoring: %m");
+
+                if (IN_SET(family, AF_INET, AF_UNSPEC)) {
+                     r = mdns_browser_revisit_cache(sb, AF_INET);
+                        if (r < 0)
+                                log_error_errno(r, "Failed to revisit cache for IPv4, ignoring: %m");
                 }
 
-                if (family == AF_UNSPEC) {
-                        r = mdns_browser_revisit_cache(sb, AF_INET);
-                        if (r < 0) {
-                                log_error_errno(r, "Failed to revisit cache for IPv4: %m");
-                                return;
-                        }
+                if (IN_SET(family, AF_INET6, AF_UNSPEC)) {
                         r = mdns_browser_revisit_cache(sb, AF_INET6);
-                        if (r < 0) {
-                                log_error_errno(r, "Failed to revisit cache for IPv6: %m");
-                                return;
-                        }
-                        return;
-                }
-
-                r = mdns_browser_revisit_cache(sb, family);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to revisit cache for family %d: %m", family);
-                        return;
+                        if (r < 0)
+                                log_error_errno(r, "Failed to revisit cache for IPv6, ignoring: %m");
                 }
         }
 }
@@ -344,7 +337,7 @@ int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int ow
                 _cleanup_free_ char *name = NULL, *type = NULL, *domain = NULL;
                 _cleanup_(sd_json_variant_unrefp) sd_json_variant *entry = NULL;
 
-                if (dns_service_contains(sb->dns_services, item->rr, owner_family, item->until))
+                if (dns_service_match_and_update(sb->dns_services, item->rr, owner_family, item->until))
                         continue;
 
                 r = dns_service_split(item->rr->ptr.name, &name, &type, &domain);
@@ -471,8 +464,7 @@ int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int ow
                 r = sd_json_buildo(&vm, SD_JSON_BUILD_PAIR("browserServiceData", SD_JSON_BUILD_VARIANT(array)));
                 if (r < 0) {
                         log_error_errno(r,
-                                        "Failed to build JSON object for "
-                                        "browser service data: %m");
+                                        "Failed to build JSON object for browser service data: %m");
                         goto finish;
                 }
 
@@ -516,7 +508,7 @@ int mdns_browser_revisit_cache(DnsServiceBrowser *sb, int owner_family) {
 }
 
 int mdns_notify_browsers_goodbye(DnsScope *scope) {
-        DnsServiceBrowser *sb = NULL;
+        DnsServiceBrowser *sb;
         int r;
 
         if (!scope)
@@ -527,8 +519,7 @@ int mdns_notify_browsers_goodbye(DnsScope *scope) {
                 if (r < 0)
                         return log_error_errno(
                                         r,
-                                        "Failed to revisit cache for service "
-                                        "browser with family %d: %m",
+                                        "Failed to revisit cache for service browser with family %d: %m",
                                         scope->family);
         }
 
@@ -536,15 +527,12 @@ int mdns_notify_browsers_goodbye(DnsScope *scope) {
 }
 
 int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int owner_family) {
-        DnsServiceBrowser *sb = NULL;
+        DnsServiceBrowser *sb;
         int r;
 
         assert(m);
 
         if (!answer)
-                return 0;
-
-        if (!m->dns_service_browsers)
                 return 0;
 
         HASHMAP_FOREACH(sb, m->dns_service_browsers) {
@@ -553,8 +541,7 @@ int mdns_notify_browsers_unsolicited_updates(Manager *m, DnsAnswer *answer, int 
                 if (r < 0)
                         return log_error_errno(
                                         r,
-                                        "Failed to match answer key with "
-                                        "service browser's key: %m");
+                                        "Failed to match answer key with service browser's key: %m");
                 if (r == 0)
                         continue;
 
@@ -582,21 +569,16 @@ static void mdns_browse_service_query_complete(DnsQuery *q) {
                 return;
 
         r = dns_answer_match_key(query->answer, sb->key, NULL);
-        if (r < 0) {
-                log_error_errno(r,
-                                "Failed to match answer key with service "
-                                "browser's key: %m");
-                return;
-        }
+        if (r < 0)
+                return (void) log_error_errno(r,
+                                "Failed to match answer key with service browser's key: %m");
 
         if (r == 0)
                 return;
 
         r = mdns_browser_revisit_cache(sb, query->answer_family);
-        if (r < 0) {
-                log_error_errno(r, "Failed to revisit cache for service browser: %m");
-                return;
-        }
+        if (r < 0)
+                return (void) log_error_errno(r, "Failed to revisit cache for service browser: %m");
 
         /* When the query is answered from cache, we only get answers for one
          * answer_family i.e. either ipv4 or ipv6. We need to perform another
@@ -616,10 +598,7 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
         int r;
 
         assert(userdata);
-
-        sb = dns_service_browser_ref(userdata);
-        if (!sb)
-                return log_error_errno(0, "Failed to reference service browser: %m");
+        assert_se(sb = dns_service_browser_ref(userdata));
 
         /* Enable the answer from the cache for the very first query */
         if (sb->delay == 0)
@@ -637,12 +616,6 @@ static int mdns_next_query_schedule(sd_event_source *s, uint64_t usec, void *use
         q->complete = mdns_browse_service_query_complete;
         q->service_browser_request = dns_service_browser_ref(sb);
         q->varlink_request = sd_varlink_ref(sb->link);
-
-        if (!q->varlink_request) {
-                log_error_errno(0, "Failed to reference varlink request: %m");
-                return -ENOMEM;
-        }
-
         sd_varlink_set_userdata(sb->link, q);
 
         r = dns_query_go(q);
@@ -698,8 +671,7 @@ void dns_browse_services_restart(Manager *m) {
 
                 if (r < 0)
                         log_error_errno(r,
-                                        "Failed to reset mDNS service subscriber event "
-                                        "for service browser: %m");
+                                        "Failed to reset mDNS service subscriber event for service browser: %m");
         }
 }
 

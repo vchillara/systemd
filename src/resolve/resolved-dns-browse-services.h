@@ -18,8 +18,9 @@ enum DnsRecordTTLState {
         DNS_RECORD_TTL_STATE_85_PERCENT,
         DNS_RECORD_TTL_STATE_90_PERCENT,
         DNS_RECORD_TTL_STATE_95_PERCENT,
+        DNS_RECORD_TTL_STATE_100_PERCENT,
         _DNS_RECORD_TTL_STATE_MAX,
-        _DNS_RECORD_TTL_STATE_MAX_INVALID = -EINVAL
+        _DNS_RECORD_TTL_STATE_INVALID = -EINVAL
 };
 
 struct DnssdDiscoveredService {
@@ -69,7 +70,7 @@ void dns_browse_services_restart(Manager *m);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServiceBrowser *, dns_service_browser_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnssdDiscoveredService *, dnssd_discovered_service_unref);
 
-bool dns_service_contains(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family, usec_t until);
+bool dns_service_match_and_update(DnssdDiscoveredService *services, DnsResourceRecord *rr, int owner_family, usec_t until);
 int mdns_manage_services_answer(DnsServiceBrowser *sb, DnsAnswer *answer, int owner_family);
 int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_family, usec_t until);
 int mdns_service_update(DnssdDiscoveredService *service, DnsResourceRecord *rr, usec_t t, usec_t until);
